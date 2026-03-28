@@ -1,7 +1,7 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_object_no_dct_no_proprio"
-  output_dir: "/mnt/draven/checkpoints/VLANeXt"
+  name: "VLANeXt_dev_liberov3_object_no_dct"
+  output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
   use_wandb: true
@@ -9,7 +9,7 @@ project:
 data:
   dataset_name: "libero"
   # /mnt/draven/data/LIBERO_modified
-  data_root: "/mnt/draven/data/LIBERO_modified"
+  data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
   task_suite_name: "libero_object"
   full_sequence: true  # If true, sample every timestep; if false, subsample
@@ -116,7 +116,7 @@ model:
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # action condition configs
-  use_proprio_input_vlm: false
+  use_proprio_input_vlm: true
   use_transformer_proprio_projector: false
   projector_depth: 2 # only applicable if use_transformer_proprio_projector=true
   projector_num_heads: 4
