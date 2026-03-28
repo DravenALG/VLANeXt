@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_goal_no_dct_no_proprio_single_view_loose"
+  name: "VLANeXt_dev_liberov3_goal_no_dct_no_proprio_single_view"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -86,7 +86,7 @@ model:
     learning_rate: 1.0e-3
   
   # condition type option: "loose", "tight", "soft"
-  condition_type: "loose"
+  condition_type: "soft"
   # loose or soft conditioning configs (applicable if condition_type is "loose" or "soft")
   num_queries: 16
   # loose conditioning configs (applicable if condition_type is "loose")
