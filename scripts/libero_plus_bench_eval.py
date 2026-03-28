@@ -86,7 +86,7 @@ def eval_libero(cfg) -> None:
     print(f"Task suite: {cfg.eval.task_suite_name}")
     log_file.write(f"Task suite: {cfg.eval.task_suite_name}\n")
 
-    json_path = Path("third_party/LIBERO-plus/libero/libero/benchmark/task_classification.json")
+    json_path = Path("/data/NTU_slab/draven/proj/third_party/LIBERO-plus/libero/libero/benchmark/task_classification.json")
     task_name_to_category = {}
     if json_path.exists():
         with open(json_path, 'r') as f:
