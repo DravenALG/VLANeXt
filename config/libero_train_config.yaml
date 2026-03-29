@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_10_no_dct_no_proprio_single_view_v2"
+  name: "VLANeXt_dev_liberov3_10_no_dct_no_proprio_single_view_loose_v2"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -90,7 +90,7 @@ model:
     tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
 
   # condition type option: "loose", "tight", "soft"
-  condition_type: "soft"
+  condition_type: "loose"
   # loose or soft conditioning configs (applicable if condition_type is "loose" or "soft")
   num_queries: 16
   # loose conditioning configs (applicable if condition_type is "loose")
