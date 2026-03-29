@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_llama"
+  name: "VLANeXt_dev_liberov3_spatial_llama_no_dct"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -109,7 +109,7 @@ model:
   future_image_mode: "horizon" # Options: "horizon" for predicting the horizon image; "goal" for predicting the final image
 
   # auxiliary dct loss weight (>0 activates)
-  dct_loss_weight: 0.1
+  dct_loss_weight: 0.0
   dct_freq_split: 0.125
   dct_low_freq_weight: 3.0
   dct_high_freq_weight: 0.0
