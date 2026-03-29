@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_10_no_dct_v2"
+  name: "VLANeXt_dev_liberov3_10_no_dct_no_proprio_v2"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -120,7 +120,7 @@ model:
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # action condition configs
-  use_proprio_input_vlm: true
+  use_proprio_input_vlm: false
   use_transformer_proprio_projector: false
   projector_depth: 2 # only applicable if use_transformer_proprio_projector=true
   projector_num_heads: 4
