@@ -112,7 +112,7 @@ def collect_action_chunks(
 
 def main():
     parser = argparse.ArgumentParser(description="Train FAST action tokenizer on Libero data.")
-    parser.add_argument('--config', type=str, default='config/libero_train_config.yaml',
+    parser.add_argument('--config', type=str, default='config/libero_train_config_FAST.yaml',
                         help='Path to the training YAML config')
     parser.add_argument('--output_dir', type=str, default='src/models/FAST_ActionTokenizer/libero_spatial_256',
                         help='Directory to save the trained tokenizer')
