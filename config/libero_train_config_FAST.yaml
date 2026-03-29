@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification_256"
+  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification_256_lr1e-5"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -131,7 +131,7 @@ train:
   seed: 42
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
-  learning_rate: 1.0e-4
+  learning_rate: 1.0e-5
   weight_decay: 0.01
   warmup_steps: 500 # 5% of max steps
   gradient_accumulation_steps: 1
