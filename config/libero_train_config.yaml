@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_10_no_dct_no_proprio_v2"
+  name: "VLANeXt_dev_liberov3_10_no_dct_no_proprio_single_view_v2"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -34,7 +34,7 @@ data:
   input_modality: "image"   # temporal history, options: "video", "image"
 
   # camera view, options: "single", "multi"
-  view_mode: "multi"
+  view_mode: "single"
   
   # augmentation (applied to image/video frames before processor)
   augmentation:
