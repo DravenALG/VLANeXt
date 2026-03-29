@@ -1,18 +1,19 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification"
+  name: "VLANeXt_dev_liberov2_spatial_no_dct_FAST_classification"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
-  save_interval: 2000
+  save_interval: 20000
   use_wandb: true
 
 data:
   dataset_name: "libero"
-  # /mnt/draven/data/LIBERO_modified
+  # /data/NTU_slab/draven/data/LIBERO_modified
   data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
   task_suite_name: "libero_spatial"
-  full_sequence: true  # If true, sample every timestep; if false, subsample
+  full_sequence: false  # If true, sample every timestep; if false, subsample
+  sampling_rate: 0.1
 
   # number of past timesteps
   # proprio: applicable for proprio. or action if "use_proprio_input_vlm=true" or "use_action_input_policy=true"
@@ -23,7 +24,7 @@ data:
   future_len: 8
 
   # shuffle buffer size
-  buffer_size: 10000
+  buffer_size: 1000
 
   # batch training configs
   batch_size: 256  # this is the total batch size across all GPUs, it will be automatically divided by the number of GPUs used
@@ -35,6 +36,12 @@ data:
 
   # camera view, options: "single", "multi"
   view_mode: "multi"
+
+  # bimanual: if true, collator uses 3 cameras (main + left_wrist + right_wrist)
+  bimanual: false
+
+  # allow_end_padding: if true, samples near the end of a trajectory are included
+  allow_end_padding: true
   
   # augmentation (applied to image/video frames before processor)
   augmentation:
@@ -87,7 +94,7 @@ model:
   fast_action_tokenizer:
     enabled: true
     expected_seq_len: 48
-    tokenizer_path: ""  # empty = use bundled pretrained; set to output_dir from train_FAST.py
+    tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
 
   # condition type option: "loose", "tight", "soft"
   condition_type: "soft"
@@ -115,8 +122,8 @@ model:
   # auxiliary dct loss weight (>0 activates)
   dct_loss_weight: 0.0
   dct_freq_split: 0.125
-  dct_low_freq_weight: 1.0
-  dct_high_freq_weight: 1.0
+  dct_low_freq_weight: 3.0
+  dct_high_freq_weight: 0.0
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # action condition configs
@@ -127,12 +134,19 @@ model:
   use_action_input_policy: false
   gradient_checkpointing: true
 
+size_speed_eval:
+  enabled: false
+  exit_after_eval: false
+  batch_size: 1
+  num_warmup: 5
+  num_runs: 50
+
 train:
-  seed: 2026
+  seed: 42
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-4
-  weight_decay: 0.01
+  weight_decay: 0.1
   warmup_steps: 500 # 5% of max steps
   gradient_accumulation_steps: 1
   max_grad_norm: 1.0

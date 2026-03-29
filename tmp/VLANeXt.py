@@ -194,11 +194,12 @@ class VLANeXt(nn.Module):
             from transformers import PreTrainedTokenizerFast as _PTTFast
             from .FAST_ActionTokenizer.processing_action_tokenizer import UniversalActionProcessor
             _custom_path = _fast_cfg.get('tokenizer_path', '')
-            print(f"FAST tokenizer custom path: {_custom_path}")
             _fast_dir = (
                 _custom_path if _custom_path and os.path.isdir(_custom_path)
                 else os.path.join(os.path.dirname(__file__), "FAST_ActionTokenizer")
             )
+            # ProcessorMixin.save_pretrained may put the tokenizer in a
+            # `bpe_tokenizer/` subdirectory; fall back to that if needed.
             _bpe_subdir = os.path.join(_fast_dir, "bpe_tokenizer")
             _bpe_load_dir = _bpe_subdir if os.path.isdir(_bpe_subdir) else _fast_dir
             print(f"Loading FAST tokenizer from: {_bpe_load_dir}")
@@ -216,7 +217,7 @@ class VLANeXt(nn.Module):
             )
             self.fast_vocab_size = _vocab_size
             self.fast_expected_seq_len = _fast_cfg.get('expected_seq_len', 64)
-            self.fast_pad_id = _vocab_size
+            self.fast_pad_id = _vocab_size  # out-of-range ID used as padding sentinel
 
         if self.enable_future_image_loss:
             print("Initializing Future Image Generator Components...")
@@ -684,6 +685,7 @@ class VLANeXt(nn.Module):
         B, T, D = actions.shape
         actions_np = actions.detach().float().cpu().numpy()
         token_sequences = self.fast_tokenizer(actions_np)  # list[list[int]], len=B
+        B = actions_np.shape[0]
         max_len = self.fast_expected_seq_len
         padded = torch.full((B, max_len), self.fast_pad_id, dtype=torch.long, device=actions.device)
         for i, seq in enumerate(token_sequences):
@@ -929,9 +931,10 @@ class VLANeXt(nn.Module):
                 logits = self.action_head(cond_input, history_actions=policy_history)
 
             if self.fast_tokenizer is not None:
-                # logits: (B, fast_expected_seq_len, fast_vocab_size)
+                # FAST: logits is (B, fast_expected_seq_len, fast_vocab_size)
                 pred_ids = logits.argmax(dim=-1)  # (B, fast_expected_seq_len)
                 pred_ids_list = pred_ids.cpu().tolist()
+                # Strip pad tokens (any ID >= fast_vocab_size is padding)
                 pred_ids_list = [[t for t in seq if t < self.fast_vocab_size] for seq in pred_ids_list]
                 try:
                     actions_np = self.fast_tokenizer.decode(

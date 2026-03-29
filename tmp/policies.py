@@ -604,8 +604,8 @@ class ActionClassificationTransformerMetaquery(nn.Module):
             x = block(x, c)
             
         output = self.final_layer(x, c)
-        output = output[:, -self.total_queries:, :]
-
+        output = output[:, -self.total_queries:, :]  
+        
         if self.fast_mode:
             return output  # (B, fast_expected_seq_len, fast_vocab_size)
         elif self.vqvae_mode:
@@ -635,10 +635,10 @@ class ActionClassificationTransformerMoE(nn.Module):
             self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
             self.total_queries = num_actions * self.dim_per_action
             self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
-
+        
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, self.total_queries, hidden_size))
-
+        
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
         
         self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))

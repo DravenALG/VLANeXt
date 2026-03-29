@@ -400,6 +400,7 @@ def train(config):
             generator_num_heads=config['model'].get('generator_num_heads', 12),
             generator_mlp_ratio=config['model'].get('generator_mlp_ratio', 4.0),
             action_vqvae=config['model'].get('action_vqvae', None),
+            fast_action_tokenizer=config['model'].get('fast_action_tokenizer', None),
             dct_loss_weight=config['model'].get('dct_loss_weight', 0.1),
             dct_low_freq_weight=config['model'].get('dct_low_freq_weight', 1.0),
             dct_high_freq_weight=config['model'].get('dct_high_freq_weight', 1.0),
