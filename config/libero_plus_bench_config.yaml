@@ -10,7 +10,7 @@ model:
 
 eval:
   finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/VLANeXt/VLANeXt_dev_liberov3/goal_no_dct_no_proprio_single_view_loose/checkpoint_final.pt" # Path to the finetuned model checkpoint
-  task_suite_name: "libero_object" # Options: libero_spatial, libero_object, libero_goal, libero_10
+  task_suite_name: "libero_goal" # Options: libero_spatial, libero_object, libero_goal, libero_10
   num_steps_wait: 10
   num_steps_execute: 8 # Number of actions to execute from the predicted chunk
   num_trials_per_task: 1
