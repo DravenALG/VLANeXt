@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification"
+  name: "VLANeXt_dev_liberov3_10_no_dct"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -11,7 +11,7 @@ data:
   # /mnt/draven/data/LIBERO_modified
   data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
-  task_suite_name: "libero_spatial"
+  task_suite_name: "libero_10"
   full_sequence: true  # If true, sample every timestep; if false, subsample
 
   # number of past timesteps
@@ -68,7 +68,7 @@ model:
   action_dim: 7
   
   # loss type option: "diffusion", "regression", "classification"
-  loss_type: "classification" # Options: "diffusion", "regression", "classification"
+  loss_type: "diffusion" # Options: "diffusion", "regression", "classification"
   # diffusion loss configs (applicable if loss_type is "diffusion")
   num_train_timesteps: 1000
   num_inference_timesteps: 10
@@ -85,7 +85,7 @@ model:
     steps: 1000
     learning_rate: 1.0e-3
   fast_action_tokenizer:
-    enabled: true
+    enabled: false
     expected_seq_len: 48
     tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
 
@@ -128,7 +128,7 @@ model:
   gradient_checkpointing: true
 
 train:
-  seed: 42
+  seed: 0
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-4
