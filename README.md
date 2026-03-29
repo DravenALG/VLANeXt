@@ -112,7 +112,7 @@ For more details, please refer to the [official repository of LIBERO](https://gi
 
 ```bash
 unset PYTHONPATH
-export PYTHONPATH=$PYTHONPATH:~/proj/VLANeXt/third_party/LIBERO
+export PYTHONPATH=$PYTHONPATH:/data/NTU_slab/draven/proj/third_party/LIBERO
 
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_bench_eval
 ```
@@ -122,7 +122,7 @@ For more details, please refer to the [official repository of LIBERO-plus](https
 
 ```bash
 unset PYTHONPATH
-export PYTHONPATH=$PYTHONPATH:~/proj/VLANeXt/third_party/LIBERO-plus
+export PYTHONPATH=$PYTHONPATH:/data/NTU_slab/draven/proj/third_party/LIBERO-plus
 
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_plus_bench_eval
 ```
