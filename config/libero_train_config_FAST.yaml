@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification_lr5e-5"
+  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification_256"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -87,7 +87,7 @@ model:
   fast_action_tokenizer:
     enabled: true
     expected_seq_len: 48
-    tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
+    tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial_256"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
 
   # condition type option: "loose", "tight", "soft"
   condition_type: "soft"
@@ -131,7 +131,7 @@ train:
   seed: 42
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
-  learning_rate: 5.0e-5
+  learning_rate: 1.0e-4
   weight_decay: 0.01
   warmup_steps: 500 # 5% of max steps
   gradient_accumulation_steps: 1

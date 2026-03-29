@@ -114,14 +114,14 @@ def main():
     parser = argparse.ArgumentParser(description="Train FAST action tokenizer on Libero data.")
     parser.add_argument('--config', type=str, default='config/libero_train_config.yaml',
                         help='Path to the training YAML config')
-    parser.add_argument('--output_dir', type=str, default='src/models/FAST_ActionTokenizer/libero_spatial',
+    parser.add_argument('--output_dir', type=str, default='src/models/FAST_ActionTokenizer/libero_spatial_256',
                         help='Directory to save the trained tokenizer')
     parser.add_argument('--max_trajs', type=int, default=None,
                         help='Cap on the number of trajectories to use (default: all)')
     parser.add_argument('--scale', type=float, default=10.0,
                         help='DCT quantization scale (default: 10.0)')
-    parser.add_argument('--vocab_size', type=int, default=2048,
-                        help='BPE vocabulary size (default: 2048)')
+    parser.add_argument('--vocab_size', type=int, default=256,
+                        help='BPE vocabulary size (default: 256)')
     args = parser.parse_args()
 
     with open(args.config) as f:
