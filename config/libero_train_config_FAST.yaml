@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification_lr1e-5_stps20k"
+  name: "VLANeXt_dev_liberov3_spatial_no_dct_FAST_classification_256_lr1e-5"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -27,7 +27,7 @@ data:
 
   # batch training configs
   batch_size: 256  # this is the total batch size across all GPUs, it will be automatically divided by the number of GPUs used
-  max_steps: 20000 # 10k for spatial, object, goal; 12k for long (10)
+  max_steps: 10000 # 10k for spatial, object, goal; 12k for long (10)
   num_workers: 2
 
   # vision input controls
@@ -87,7 +87,7 @@ model:
   fast_action_tokenizer:
     enabled: true
     expected_seq_len: 48
-    tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
+    tokenizer_path: "src/models/FAST_ActionTokenizer/libero_spatial_256"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
 
   # condition type option: "loose", "tight", "soft"
   condition_type: "soft"
@@ -133,9 +133,9 @@ train:
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-5
   weight_decay: 0.01
-  warmup_steps: 1000 # 5% of max steps
+  warmup_steps: 500 # 5% of max steps
   gradient_accumulation_steps: 1
   max_grad_norm: 1.0
   device: "cuda"
-  distributed: true
+  distributed: false
   dist_backend: "nccl"

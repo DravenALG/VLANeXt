@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_10_no_dct_no_proprio_single_view_v2"
+  name: "VLANeXt_dev_liberov3_spatial"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -11,7 +11,7 @@ data:
   # /mnt/draven/data/LIBERO_modified
   data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
-  task_suite_name: "libero_10"
+  task_suite_name: "libero_spatial"
   full_sequence: true  # If true, sample every timestep; if false, subsample
 
   # number of past timesteps
@@ -34,7 +34,7 @@ data:
   input_modality: "image"   # temporal history, options: "video", "image"
 
   # camera view, options: "single", "multi"
-  view_mode: "single"
+  view_mode: "multi"
   
   # augmentation (applied to image/video frames before processor)
   augmentation:
@@ -113,14 +113,14 @@ model:
   future_image_mode: "horizon" # Options: "horizon" for predicting the horizon image; "goal" for predicting the final image
 
   # auxiliary dct loss weight (>0 activates)
-  dct_loss_weight: 0.0
+  dct_loss_weight: 0.1
   dct_freq_split: 0.125
-  dct_low_freq_weight: 1.0
-  dct_high_freq_weight: 1.0
+  dct_low_freq_weight: 3.0
+  dct_high_freq_weight: 0.0
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # action condition configs
-  use_proprio_input_vlm: false
+  use_proprio_input_vlm: true
   use_transformer_proprio_projector: false
   projector_depth: 2 # only applicable if use_transformer_proprio_projector=true
   projector_num_heads: 4
@@ -128,7 +128,7 @@ model:
   gradient_checkpointing: true
 
 train:
-  seed: 8
+  seed: 2026
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-4
