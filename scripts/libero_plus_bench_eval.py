@@ -120,9 +120,6 @@ def eval_libero(cfg) -> None:
     elif '10' in train_suite_name:
         action_min = np.array(action_min_10)
         action_max = np.array(action_max_10)
-    elif 'mixed' in train_suite_name:
-        action_min = np.array(action_min_mixed)
-        action_max = np.array(action_max_mixed)
     else:
         action_min = np.array(action_min_10)
         action_max = np.array(action_max_10)
