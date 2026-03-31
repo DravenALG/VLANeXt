@@ -16,5 +16,5 @@ eval:
   num_trials_per_task: 1
   seed: 42
   image_size: 256
-  resume_episodes: 2000    # for resume, total episodes already completed across all tasks, 0 for fresh start
+  resume_episodes: 1700    # for resume, total episodes already completed across all tasks, 0 for fresh start
   resume_successes: 0   # for resume, total successes achieved in those completed episodes, 0 for fresh start
