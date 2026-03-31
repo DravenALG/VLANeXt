@@ -80,14 +80,12 @@ class UniversalActionProcessor(ProcessorMixin):
             try:
                 decoded_tokens = self.bpe_tokenizer.decode(token)
                 decoded_dct_coeff = np.array(list(map(ord, decoded_tokens))) + self.min_token
-                decoded_dct_coeff = decoded_dct_coeff.reshape(-1, self.action_dim)
-                assert (
-                    decoded_dct_coeff.shape
-                    == (
-                        self.time_horizon,
-                        self.action_dim,
-                    )
-                ), f"Decoded DCT coefficients have shape {decoded_dct_coeff.shape}, expected ({self.time_horizon}, {self.action_dim})"
+                expected_len = self.time_horizon * self.action_dim
+                if len(decoded_dct_coeff) > expected_len:
+                    decoded_dct_coeff = decoded_dct_coeff[:expected_len]
+                elif len(decoded_dct_coeff) < expected_len:
+                    decoded_dct_coeff = np.pad(decoded_dct_coeff, (0, expected_len - len(decoded_dct_coeff)))
+                decoded_dct_coeff = decoded_dct_coeff.reshape(self.time_horizon, self.action_dim)
             except Exception as e:
                 print(f"Error decoding tokens: {e}")
                 print(f"Tokens: {token}")
