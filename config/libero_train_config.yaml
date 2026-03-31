@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_dct_low3_high0"
+  name: "VLANeXt_dev_liberov3_object_dct_low3_high0"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -11,7 +11,7 @@ data:
   # /mnt/draven/data/LIBERO_modified
   data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
-  task_suite_name: "libero_spatial"
+  task_suite_name: "libero_object"
   full_sequence: true  # If true, sample every timestep; if false, subsample
 
   # number of past timesteps
