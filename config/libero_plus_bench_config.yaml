@@ -9,12 +9,12 @@ model:
   scheduler_type: "flow_match" # Options: "ddpm", "ddim", "flow_match"
 
 eval:
-  finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/VLANeXt/VLANeXt_dev_liberov3/10_dct_low5_high0/checkpoint_final.pt" # Path to the finetuned model checkpoint
-  task_suite_name: "libero_10" # Options: libero_spatial, libero_object, libero_goal, libero_10
+  finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/VLANeXt/VLANeXt_dev_liberov3/spatial_dct_low5_high0/checkpoint_final.pt" # Path to the finetuned model checkpoint
+  task_suite_name: "libero_spatial" # Options: libero_spatial, libero_object, libero_goal, libero_10
   num_steps_wait: 10
   num_steps_execute: 8 # Number of actions to execute from the predicted chunk
   num_trials_per_task: 1
   seed: 42
   image_size: 256
-  resume_episodes: 2112    # for resume, total episodes already completed across all tasks, 0 for fresh start
-  resume_successes: 1488   # for resume, total successes achieved in those completed episodes, 0 for fresh start
+  resume_episodes: 0    # for resume, total episodes already completed across all tasks, 0 for fresh start
+  resume_successes: 0   # for resume, total successes achieved in those completed episodes, 0 for fresh start
