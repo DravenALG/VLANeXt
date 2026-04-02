@@ -537,8 +537,7 @@ class ActionVQVAE(nn.Module):
 class ActionClassificationTransformerMetaquery(nn.Module):
     def __init__(self, action_dim, condition_dim, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
-                 vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3,
-                 fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048):
+                 vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3):
         super().__init__()
         self.num_actions = num_actions
         self.action_dim = action_dim
@@ -546,17 +545,11 @@ class ActionClassificationTransformerMetaquery(nn.Module):
         self.vqvae_mode = vqvae_mode
         self.vq_codebook_size = vq_codebook_size
         self.vq_latent_codes = vq_latent_codes
-        self.fast_mode = fast_mode
-        self.fast_vocab_size = fast_vocab_size
         self.pose_dim = action_dim - 1
 
-        if fast_mode:
-            self.total_queries = fast_expected_seq_len
-            self.per_dim_classes = fast_vocab_size
-        else:
-            self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
-            self.total_queries = num_actions * self.dim_per_action
-            self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
+        self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
+        self.total_queries = num_actions * self.dim_per_action
+        self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
         
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, self.total_queries, hidden_size))
@@ -606,9 +599,7 @@ class ActionClassificationTransformerMetaquery(nn.Module):
         output = self.final_layer(x, c)
         output = output[:, -self.total_queries:, :]
 
-        if self.fast_mode:
-            return output  # (B, fast_expected_seq_len, fast_vocab_size)
-        elif self.vqvae_mode:
+        if self.vqvae_mode:
             return output.view(B, self.num_actions, self.vq_latent_codes, self.per_dim_classes)
         else:
             return output.view(B, self.num_actions, self.action_dim, self.per_dim_classes)
@@ -616,8 +607,7 @@ class ActionClassificationTransformerMetaquery(nn.Module):
 class ActionClassificationTransformerMoE(nn.Module):
     def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
-                 vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3, gen_hidden_size=None,
-                 fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048):
+                 vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3, gen_hidden_size=None):
         super().__init__()
         self.num_actions = num_actions
         self.action_dim = action_dim
@@ -625,16 +615,10 @@ class ActionClassificationTransformerMoE(nn.Module):
         self.vqvae_mode = vqvae_mode
         self.vq_codebook_size = vq_codebook_size
         self.vq_latent_codes = vq_latent_codes
-        self.fast_mode = fast_mode
-        self.fast_vocab_size = fast_vocab_size
 
-        if fast_mode:
-            self.total_queries = fast_expected_seq_len
-            self.per_dim_classes = fast_vocab_size
-        else:
-            self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
-            self.total_queries = num_actions * self.dim_per_action
-            self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
+        self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
+        self.total_queries = num_actions * self.dim_per_action
+        self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
 
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, self.total_queries, hidden_size))
@@ -703,9 +687,7 @@ class ActionClassificationTransformerMoE(nn.Module):
         output = self.final_layer(x, c)
         output = output[:, -self.total_queries:, :]
 
-        if self.fast_mode:
-            return output  # (B, fast_expected_seq_len, fast_vocab_size)
-        elif self.vqvae_mode:
+        if self.vqvae_mode:
             return output.view(B, self.num_actions, self.vq_latent_codes, self.per_dim_classes)
         else:
             return output.view(B, self.num_actions, self.action_dim, self.per_dim_classes)

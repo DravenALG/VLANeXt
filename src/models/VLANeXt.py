@@ -69,7 +69,7 @@ class VLANeXt(nn.Module):
         gradient_checkpointing=True,
         num_bins=256,
         action_vqvae=None,
-        fast_action_tokenizer=None,
+
         generator_hidden_size=768,
         generator_depth=12,
         generator_num_heads=12,
@@ -184,39 +184,6 @@ class VLANeXt(nn.Module):
         else:
             self.action_vqvae = None
 
-        self.fast_tokenizer = None
-        self.fast_vocab_size = None
-        self.fast_expected_seq_len = None
-        self.fast_pad_id = None
-        _fast_cfg = fast_action_tokenizer or {}
-        if _fast_cfg.get('enabled', False):
-            import json as _json
-            from transformers import PreTrainedTokenizerFast as _PTTFast
-            from .FAST_ActionTokenizer.processing_action_tokenizer import UniversalActionProcessor
-            _custom_path = _fast_cfg.get('tokenizer_path', '')
-            print(f"FAST tokenizer custom path: {_custom_path}")
-            _fast_dir = (
-                _custom_path if _custom_path and os.path.isdir(_custom_path)
-                else os.path.join(os.path.dirname(__file__), "FAST_ActionTokenizer")
-            )
-            _bpe_subdir = os.path.join(_fast_dir, "bpe_tokenizer")
-            _bpe_load_dir = _bpe_subdir if os.path.isdir(_bpe_subdir) else _fast_dir
-            print(f"Loading FAST tokenizer from: {_bpe_load_dir}")
-            _bpe = _PTTFast.from_pretrained(_bpe_load_dir)
-            with open(os.path.join(_fast_dir, "processor_config.json")) as _f:
-                _proc_cfg = _json.load(_f)
-            _vocab_size = _proc_cfg.get('vocab_size', 2048)
-            self.fast_tokenizer = UniversalActionProcessor(
-                bpe_tokenizer=_bpe,
-                scale=_proc_cfg.get('scale', 10),
-                vocab_size=_vocab_size,
-                min_token=_proc_cfg.get('min_token', 0),
-                action_dim=action_dim,
-                time_horizon=num_actions,
-            )
-            self.fast_vocab_size = _vocab_size
-            self.fast_expected_seq_len = _fast_cfg.get('expected_seq_len', 64)
-            self.fast_pad_id = _vocab_size
 
         if self.enable_future_image_loss:
             print("Initializing Future Image Generator Components...")
@@ -298,23 +265,9 @@ class VLANeXt(nn.Module):
             self.noise_scheduler = None
         elif loss_type == "classification":
             is_vqvae = (self.action_vqvae is not None)
-            is_fast = (self.fast_tokenizer is not None)
 
             if condition_type == "loose":
-                if is_fast:
-                    self.action_head = ActionClassificationTransformerMetaquery(
-                        action_dim=action_dim,
-                        condition_dim=self.hidden_size,
-                        num_actions=num_actions,
-                        hidden_size=policy_hidden_size,
-                        depth=policy_depth,
-                        num_heads=policy_num_heads,
-                        mlp_ratio=policy_mlp_ratio,
-                        fast_mode=True,
-                        fast_expected_seq_len=self.fast_expected_seq_len,
-                        fast_vocab_size=self.fast_vocab_size,
-                    )
-                elif is_vqvae:
+                if is_vqvae:
                     self.action_head = ActionClassificationTransformerMetaquery(
                         action_dim=action_dim,
                         condition_dim=self.hidden_size,
@@ -340,21 +293,7 @@ class VLANeXt(nn.Module):
                         vqvae_mode=False
                     )
             elif condition_type in ["tight", "soft"]:
-                if is_fast:
-                    self.action_head = ActionClassificationTransformerMoE(
-                        action_dim=action_dim,
-                        vlm_hidden_size=self.hidden_size,
-                        num_actions=num_actions,
-                        hidden_size=policy_hidden_size,
-                        depth=policy_depth,
-                        num_heads=policy_num_heads,
-                        mlp_ratio=policy_mlp_ratio,
-                        fast_mode=True,
-                        fast_expected_seq_len=self.fast_expected_seq_len,
-                        fast_vocab_size=self.fast_vocab_size,
-                        gen_hidden_size=gen_hidden_dim
-                    )
-                elif is_vqvae:
+                if is_vqvae:
                     self.action_head = ActionClassificationTransformerMoE(
                         action_dim=action_dim,
                         vlm_hidden_size=self.hidden_size,
@@ -679,18 +618,6 @@ class VLANeXt(nn.Module):
                 pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images
             )
 
-    def _tokenize_actions_fast(self, actions):
-        """Convert (B, T, D) action tensor to padded FAST BPE token IDs (B, fast_expected_seq_len)."""
-        B, T, D = actions.shape
-        actions_np = actions.detach().float().cpu().numpy()
-        token_sequences = self.fast_tokenizer(actions_np)  # list[list[int]], len=B
-        max_len = self.fast_expected_seq_len
-        padded = torch.full((B, max_len), self.fast_pad_id, dtype=torch.long, device=actions.device)
-        for i, seq in enumerate(token_sequences):
-            seq_len = min(len(seq), max_len)
-            padded[i, :seq_len] = torch.tensor(seq[:seq_len], dtype=torch.long, device=actions.device)
-        return padded
-
     def _forward_classification(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None):
         connector_out, hidden_states = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
@@ -721,14 +648,7 @@ class VLANeXt(nn.Module):
         pred_action_continuous = None
         loss = 0.0
 
-        if self.fast_tokenizer is not None:
-            target_ids = self._tokenize_actions_fast(actions)  # (B, fast_expected_seq_len)
-            loss = F.cross_entropy(
-                pred_logits.reshape(-1, self.fast_vocab_size),
-                target_ids.reshape(-1),
-                ignore_index=self.fast_pad_id
-            )
-        elif self.action_vqvae is not None:
+        if self.action_vqvae is not None:
              with torch.no_grad():
                  self.action_vqvae.eval()
                  actions_input = actions.to(dtype=self.action_vqvae.in_proj.weight.dtype)
@@ -928,22 +848,7 @@ class VLANeXt(nn.Module):
                 cond_input = connector_out.mean(dim=1)
                 logits = self.action_head(cond_input, history_actions=policy_history)
 
-            if self.fast_tokenizer is not None:
-                # logits: (B, fast_expected_seq_len, fast_vocab_size)
-                pred_ids = logits.argmax(dim=-1)  # (B, fast_expected_seq_len)
-                pred_ids_list = pred_ids.cpu().tolist()
-                pred_ids_list = [[t for t in seq if t < self.fast_vocab_size] for seq in pred_ids_list]
-                try:
-                    actions_np = self.fast_tokenizer.decode(
-                        pred_ids_list, time_horizon=self.num_actions, action_dim=self.action_dim
-                    )
-                    action = torch.from_numpy(actions_np).to(device=input_ids.device, dtype=self.lmm.dtype)
-                    return action
-                except Exception as e:
-                    print(f"FAST decode failed: {e}. Returning zeros.")
-                    return torch.zeros(B, self.num_actions, self.action_dim, device=input_ids.device, dtype=self.lmm.dtype)
-
-            elif self.action_vqvae is not None:
+            if self.action_vqvae is not None:
                 indices = torch.argmax(logits, dim=-1)  # (B, T, Latent_Codes)
                 action = self.action_vqvae.decode_indices(indices)
                 return action.to(dtype=self.lmm.dtype)

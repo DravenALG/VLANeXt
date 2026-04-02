@@ -87,7 +87,7 @@ def get_vla(cfg):
             gradient_checkpointing=False,
             num_bins=model_config.get('num_bins', 256),
             action_vqvae=model_config.get('action_vqvae', None),
-            fast_action_tokenizer=model_config.get('fast_action_tokenizer', None),
+
             generator_hidden_size=model_config.get('generator_hidden_size', 768),
             generator_depth=model_config.get('generator_depth', 12),
             generator_num_heads=model_config.get('generator_num_heads', 12),
