@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_goal_dct_low1_high0"
+  name: "VLANeXt_dev_liberov3_spatial_dct_low8_high0"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -11,7 +11,7 @@ data:
   # /mnt/draven/data/LIBERO_modified
   data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
-  task_suite_name: "libero_goal"
+  task_suite_name: "libero_spatial"
   full_sequence: true  # If true, sample every timestep; if false, subsample
 
   # number of past timesteps
@@ -111,7 +111,7 @@ model:
   # auxiliary dct loss weight (>0 activates)
   dct_loss_weight: 0.1
   dct_freq_split: 0.125
-  dct_low_freq_weight: 1.0
+  dct_low_freq_weight: 8.0
   dct_high_freq_weight: 0.0
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
