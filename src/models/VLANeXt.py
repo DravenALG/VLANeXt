@@ -791,8 +791,7 @@ class VLANeXt(nn.Module):
 
             if pred_x_start is not None:
                  loss_dct = self._compute_dct_loss(pred_x_start.float(), actions.float())
-                #  loss = loss + self.dct_loss_weight * loss_dct
-                 loss = self.dct_loss_weight * loss_dct
+                 loss = loss + self.dct_loss_weight * loss_dct
             
         if self.future_image_loss_weight > 0:
             loss = loss + self.future_image_loss_weight * loss_img
