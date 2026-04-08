@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_10_dct_low5_high0_v2"
+  name: "VLANeXt_dev_liberov3_10_dct_low3_high0_v2"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -111,7 +111,7 @@ model:
   # auxiliary dct loss weight (>0 activates)
   dct_loss_weight: 0.1
   dct_freq_split: 0.125
-  dct_low_freq_weight: 5.0
+  dct_low_freq_weight: 3.0
   dct_high_freq_weight: 0.0
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
