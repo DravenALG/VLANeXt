@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_spatial_dct_low5_high0_paligemma_testing"
+  name: "VLANeXt_dev_liberov3_spatial_dct_low5_high0_paligemma_steps20k"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -27,7 +27,7 @@ data:
 
   # batch training configs
   batch_size: 256  # this is the total batch size across all GPUs, it will be automatically divided by the number of GPUs used
-  max_steps: 10000 # 10k for spatial, object, goal; 12k for long (10)
+  max_steps: 20000 # 10k for spatial, object, goal; 12k for long (10)
   num_workers: 2
 
   # vision input controls
@@ -124,13 +124,13 @@ model:
   gradient_checkpointing: true
 
 train:
-  seed: 8
+  seed: 2026
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-4
   weight_decay: 0.01
-  warmup_steps: 500 # 5% of max steps
-  gradient_accumulation_steps: 4
+  warmup_steps: 1000 # 5% of max steps
+  gradient_accumulation_steps: 2
   max_grad_norm: 1.0
   device: "cuda"
   distributed: false
