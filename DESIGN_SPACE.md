@@ -308,8 +308,8 @@ model:
   # Fraction of DCT coefficients treated as low-frequency (0.0–1.0)
   dct_freq_split: 0.125
   # Per-band loss weights
-  dct_low_freq_weight: 1.0
-  dct_high_freq_weight: 1.0
+  dct_low_freq_weight: 5.0
+  dct_high_freq_weight: 0.0
   # Similarity metric for DCT loss
   dct_similarity_type: "mse"     # Options: "mse", "mae", "cosine"
 ```

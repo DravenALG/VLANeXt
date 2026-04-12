@@ -9,20 +9,15 @@
 <img src="imgs/roadmap.png" alt="roadmap of vlanext" width="60%"/>
 </p>
 
-This is a PyTorch implementation of the paper: [VLANeXt: Recipes for Building Strong VLA Models](), and also a **unified**, **easy-to-use** codebase that standardizes training and evaluation while exposing the key components of the VLA design space. It is intentionally lightweight and minimally encapsulated, enabling researchers to reproduce results, probe alternative design choices, and build new VLA variants on a shared, transparent foundation. We also release a [curated and continuously updated list of VLA research](https://github.com/DravenALG/awesome-vla) (Awesome VLA) to help better understand the development of VLAs.
+This is a PyTorch implementation of the paper: [VLANeXt: Recipes for Building Strong VLA Models](), and also a **unified**, **easy-to-use** codebase that standardizes training and evaluation while exposing the key components of the VLA design space. It is intentionally lightweight and minimally encapsulated, enabling researchers to reproduce results, probe alternative design choices, and build new VLA variants on a shared, transparent foundation. We also release a [curated and continuously updated list of VLA & WAM research](https://github.com/DravenALG/awesome-vla-wam) (Awesome VLA & WAM) to help better understand the development of VLAs.
 
-<!-- **Xiao-Ming Wu**, Bin Fan, Kang Liao, Jian-Jian Jiang, Runze Yang, Yihang Luo, Zhonghua Wu, Wei-Shi Zheng, Chen Change Loy*. -->
+**Xiao-Ming Wu**, Bin Fan, Kang Liao, Jian-Jian Jiang, Runze Yang, Yihang Luo, Zhonghua Wu, Wei-Shi Zheng, Chen Change Loy*.
 
 <p align="center">
 <img src="imgs/VLANeXt_codebase.png" alt="codebase overview" width="80%"/>
 </p>
 
-We'll keep updating this repo with new features. Welcome to join us by:
-1. **Build your own VLAs on our VLANeXt codebase**. We will keep your models alongside VLANeXt and RT-2 baseline in our repo for others to use.
-2. **Add your VLMs, diffusion algorithms or other general strategies in our VLANeXt codebase**, to enrich the design space of VLANeXt, and test your general strategies in the robotics domain.
-
 Let's build the future of VLAs together! If you have any questions, feel free to contact me by xiaoming.wu@ntu.edu.sg.
-
 
 ## 🛠️ Environment Setup
 
@@ -60,7 +55,7 @@ We also need to download the asserts, see [LIBERO-plus](https://github.com/sylve
 
 
 ## 🚀 Training
-Droid dataset is for robotics pretraining (used in our real-world experiments), and libero dataset is for benchmark evaluation (used in our benchmark evaluation). The default training setting is for our final VLANeXt framework.
+Droid dataset is for robotics pretraining (used in our real-world experiments), and libero dataset is for benchmark evaluation (used in our benchmark evaluation).
 <p align="center">
 <img src="imgs/framework.png" alt="framework of vlanext" width="80%"/>
 </p>
@@ -105,7 +100,7 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node=4 --master_port=29506 -m 
 ```
 
 ## 📊 Evaluation
-We have released VLANeXt checkpoints for the four LIBERO or LIBERO-plus suites on [huggingface](https://huggingface.co/DravenALG/VLANeXt). These checkpoints achieve slightly better performance than the results reported in the paper, as the paper reports the average results.
+We have released VLANeXt checkpoints for the four LIBERO or LIBERO-plus suites on [huggingface](https://huggingface.co/DravenALG/VLANeXt).
 
 ### LIBERO
 For more details, please refer to the [official repository of LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO).
@@ -126,10 +121,6 @@ export PYTHONPATH=$PYTHONPATH:/data/NTU_slab/draven/proj/third_party/LIBERO-plus
 
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_plus_bench_eval
 ```
-
-### real-world attempts
-We also released a checkpoint trained on the Droid dataset, which can be finetuned for your real-world experiments with a Franka robotic arm.
-
 
 ## ⚡ Analysis
 **Model Size and Speed**  
