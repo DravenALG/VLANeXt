@@ -538,7 +538,7 @@ class VLANeXt(nn.Module):
 
         causal_mask_mapping = self.lmm.create_masks_for_generate(
             config=self.lmm.config,
-            inputs_embeds=inputs_embeds,
+            input_embeds=inputs_embeds,
             attention_mask=attention_mask,
             cache_position=cache_position,
             past_key_values=None,
