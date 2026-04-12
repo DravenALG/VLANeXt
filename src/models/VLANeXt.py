@@ -368,9 +368,9 @@ class VLANeXt(nn.Module):
         loss = self.action_vqvae(actions)
         return loss
 
-    def get_vlm_condition(self, input_ids, attention_mask, proprioception=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None):
+    def get_vlm_condition(self, input_ids, attention_mask, proprioception=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None, token_type_ids=None):
         if self.model_family == "paligemma":
-            return self._get_vlm_condition_paligemma(input_ids, attention_mask, proprioception, proprio_attention_mask, pixel_values)
+            return self._get_vlm_condition_paligemma(input_ids, attention_mask, proprioception, proprio_attention_mask, pixel_values, token_type_ids=token_type_ids)
         elif self.model_family == "llama":
             return self._get_vlm_condition_llama(input_ids, attention_mask, pixel_values, proprioception, proprio_attention_mask)
         elif self.model_family == "qwen":
@@ -494,24 +494,21 @@ class VLANeXt(nn.Module):
 
         return connector_out, hidden_states
 
-    def _get_vlm_condition_paligemma(self, input_ids, attention_mask, proprioception, proprio_attention_mask, pixel_values):
+    def _get_vlm_condition_paligemma(self, input_ids, attention_mask, proprioception, proprio_attention_mask, pixel_values, token_type_ids=None):
+        from transformers.models.paligemma.modeling_paligemma import create_causal_mask_mapping
+
         B = input_ids.shape[0]
 
         backbone = self.lmm.model
 
         inputs_embeds = backbone.get_input_embeddings()(input_ids)
 
-        # Build token_type_ids: 0 for image placeholder tokens, 1 for text tokens
-        # PaliGemma uses token_type_ids to apply bidirectional attention on image tokens
-        token_type_ids = torch.ones_like(input_ids)
         if pixel_values is not None:
-            image_outputs = backbone.get_image_features(pixel_values, return_dict=True)
+            image_outputs = backbone.get_image_features(pixel_values)
             image_features = image_outputs.pooler_output
             image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
             special_image_mask = backbone.get_placeholder_mask(input_ids, inputs_embeds, image_features)
             inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
-            # Mark image tokens as 0 in token_type_ids (PaliGemma convention)
-            token_type_ids[input_ids == backbone.config.image_token_id] = 0
 
         if self.use_proprio_input_vlm and proprioception is not None:
             proprio_embeds = self.action_projector(proprioception.to(device=inputs_embeds.device, dtype=inputs_embeds.dtype))
@@ -522,9 +519,10 @@ class VLANeXt(nn.Module):
                 else:
                     proprio_mask = torch.ones(B, proprioception.shape[1], device=attention_mask.device, dtype=attention_mask.dtype)
                 attention_mask = torch.cat([proprio_mask, attention_mask], dim=1)
-            # Proprio tokens are text-like (causal attention)
-            proprio_type_ids = torch.ones(B, proprioception.shape[1], device=token_type_ids.device, dtype=token_type_ids.dtype)
-            token_type_ids = torch.cat([proprio_type_ids, token_type_ids], dim=1)
+            # Proprio tokens are prefix context — token_type_ids=0 (bidirectional)
+            if token_type_ids is not None:
+                proprio_type_ids = torch.zeros(B, proprioception.shape[1], device=token_type_ids.device, dtype=token_type_ids.dtype)
+                token_type_ids = torch.cat([proprio_type_ids, token_type_ids], dim=1)
 
         if self.condition_type != "tight":
             queries_embeds = self.meta_queries.unsqueeze(0).expand(B, -1, -1).to(inputs_embeds.dtype)
@@ -532,17 +530,14 @@ class VLANeXt(nn.Module):
             if attention_mask is not None:
                 queries_mask = torch.ones(B, self.num_queries, device=attention_mask.device, dtype=attention_mask.dtype)
                 attention_mask = torch.cat([attention_mask, queries_mask], dim=1)
-            # Query tokens are text-like (causal attention)
-            queries_type_ids = torch.ones(B, self.num_queries, device=token_type_ids.device, dtype=token_type_ids.dtype)
-            token_type_ids = torch.cat([token_type_ids, queries_type_ids], dim=1)
+            # Query tokens are suffix — token_type_ids=1 (causal)
+            if token_type_ids is not None:
+                queries_type_ids = torch.ones(B, self.num_queries, device=token_type_ids.device, dtype=token_type_ids.dtype)
+                token_type_ids = torch.cat([token_type_ids, queries_type_ids], dim=1)
 
-        # PaliGemma uses 1-indexed position_ids for RoPE
-        seq_len = inputs_embeds.shape[1]
-        cache_position = torch.arange(seq_len, device=inputs_embeds.device)
-        position_ids = (cache_position + 1).unsqueeze(0).expand(B, -1)
-
-        # Build causal mask with bidirectional attention for image tokens
-        from transformers.models.paligemma.modeling_paligemma import create_causal_mask_mapping
+        # Build the proper PaliGemma causal mask with bidirectional attention on prefix/image tokens
+        cache_position = torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device)
+        position_ids = cache_position.unsqueeze(0) + 1  # PaliGemma positions are 1-indexed
         causal_mask_mapping = create_causal_mask_mapping(
             backbone.config,
             inputs_embeds,
@@ -629,31 +624,32 @@ class VLANeXt(nn.Module):
             raise ValueError(f"Unknown dct_similarity_type: {sim_type!r}. "
                              f"Options are: 'mse', 'mae', 'cosine'.")
 
-    def forward(self, input_ids=None, attention_mask=None, actions=None, proprioception=None, history_actions=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None, future_images=None, task=None):
+    def forward(self, input_ids=None, attention_mask=None, actions=None, proprioception=None, history_actions=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None, future_images=None, task=None, token_type_ids=None):
         if task == "action_vqvae_pretrain":
             return self.forward_action_vqvae_pretrain(actions)
             
         if self.loss_type == "regression":
             return self._forward_regression(
                 input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask,
-                pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images
+                pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images, token_type_ids=token_type_ids
             )
         elif self.loss_type == "classification":
             return self._forward_classification(
                 input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask,
-                pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images
+                pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images, token_type_ids=token_type_ids
             )
         elif self.loss_type == "diffusion":
             return self._forward_diffusion(
                 input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask,
-                pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images
+                pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images, token_type_ids=token_type_ids
             )
 
-    def _forward_classification(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None):
+    def _forward_classification(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None, token_type_ids=None):
         connector_out, hidden_states = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
             pixel_values=pixel_values, pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw
+            image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw,
+            token_type_ids=token_type_ids
         )
         
         loss_img = 0.0
@@ -728,11 +724,12 @@ class VLANeXt(nn.Module):
             loss = loss + self.future_image_loss_weight * loss_img
         return loss
 
-    def _forward_regression(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None):
+    def _forward_regression(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None, token_type_ids=None):
         connector_out, hidden_states = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
             pixel_values=pixel_values, pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw
+            image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw,
+            token_type_ids=token_type_ids
         )
 
         loss_img = 0.0
@@ -764,11 +761,12 @@ class VLANeXt(nn.Module):
             loss = loss + self.future_image_loss_weight * loss_img
         return loss
 
-    def _forward_diffusion(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None):
+    def _forward_diffusion(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, future_images=None, token_type_ids=None):
         connector_out, hidden_states = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
             pixel_values=pixel_values, pixel_values_videos=pixel_values_videos,
-            image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw
+            image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw,
+            token_type_ids=token_type_ids
         )
 
         loss_img = 0.0
@@ -829,17 +827,18 @@ class VLANeXt(nn.Module):
         return loss
 
     @torch.no_grad()
-    def predict_action(self, input_ids, attention_mask, proprioception=None, history_actions=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None):
+    def predict_action(self, input_ids, attention_mask, proprioception=None, history_actions=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None, token_type_ids=None):
         B = input_ids.shape[0]
-        
+
         connector_out, hidden_states = self.get_vlm_condition(
-            input_ids, attention_mask, 
+            input_ids, attention_mask,
             proprioception=proprioception,
             proprio_attention_mask=proprio_attention_mask,
-            pixel_values=pixel_values, 
+            pixel_values=pixel_values,
             pixel_values_videos=pixel_values_videos,
             image_grid_thw=image_grid_thw,
-            video_grid_thw=video_grid_thw
+            video_grid_thw=video_grid_thw,
+            token_type_ids=token_type_ids
         )
         
         policy_history = history_actions if self.use_action_input_policy else None
@@ -919,15 +918,16 @@ class VLANeXt(nn.Module):
             raise ValueError(f"Unknown loss type: {self.loss_type}")
 
     @torch.no_grad()
-    def predict_image(self, input_ids, attention_mask, proprioception=None, history_actions=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None, max_new_tokens=1024):
+    def predict_image(self, input_ids, attention_mask, proprioception=None, history_actions=None, proprio_attention_mask=None, pixel_values=None, pixel_values_videos=None, image_grid_thw=None, video_grid_thw=None, max_new_tokens=1024, token_type_ids=None):
         _, hidden_states = self.get_vlm_condition(
-            input_ids, attention_mask, 
+            input_ids, attention_mask,
             proprioception=proprioception,
             proprio_attention_mask=proprio_attention_mask,
-            pixel_values=pixel_values, 
+            pixel_values=pixel_values,
             pixel_values_videos=pixel_values_videos,
             image_grid_thw=image_grid_thw,
-            video_grid_thw=video_grid_thw
+            video_grid_thw=video_grid_thw,
+            token_type_ids=token_type_ids
         )
         gen_vlm_ctx = hidden_states
         
