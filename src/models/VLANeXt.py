@@ -496,18 +496,23 @@ class VLANeXt(nn.Module):
 
     def _get_vlm_condition_paligemma(self, input_ids, attention_mask, proprioception, proprio_attention_mask, pixel_values):
         B = input_ids.shape[0]
-        
+
         backbone = self.lmm.model
-        
+
         inputs_embeds = backbone.get_input_embeddings()(input_ids)
 
+        # Build token_type_ids: 0 for image placeholder tokens, 1 for text tokens
+        # PaliGemma uses token_type_ids to apply bidirectional attention on image tokens
+        token_type_ids = torch.ones_like(input_ids)
         if pixel_values is not None:
-            image_outputs = backbone.get_image_features(pixel_values)
+            image_outputs = backbone.get_image_features(pixel_values, return_dict=True)
             image_features = image_outputs.pooler_output
             image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
             special_image_mask = backbone.get_placeholder_mask(input_ids, inputs_embeds, image_features)
             inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
-        
+            # Mark image tokens as 0 in token_type_ids (PaliGemma convention)
+            token_type_ids[input_ids == backbone.config.image_token_id] = 0
+
         if self.use_proprio_input_vlm and proprioception is not None:
             proprio_embeds = self.action_projector(proprioception.to(device=inputs_embeds.device, dtype=inputs_embeds.dtype))
             inputs_embeds = torch.cat([proprio_embeds, inputs_embeds], dim=1)
@@ -517,6 +522,9 @@ class VLANeXt(nn.Module):
                 else:
                     proprio_mask = torch.ones(B, proprioception.shape[1], device=attention_mask.device, dtype=attention_mask.dtype)
                 attention_mask = torch.cat([proprio_mask, attention_mask], dim=1)
+            # Proprio tokens are text-like (causal attention)
+            proprio_type_ids = torch.ones(B, proprioception.shape[1], device=token_type_ids.device, dtype=token_type_ids.dtype)
+            token_type_ids = torch.cat([proprio_type_ids, token_type_ids], dim=1)
 
         if self.condition_type != "tight":
             queries_embeds = self.meta_queries.unsqueeze(0).expand(B, -1, -1).to(inputs_embeds.dtype)
@@ -524,11 +532,34 @@ class VLANeXt(nn.Module):
             if attention_mask is not None:
                 queries_mask = torch.ones(B, self.num_queries, device=attention_mask.device, dtype=attention_mask.dtype)
                 attention_mask = torch.cat([attention_mask, queries_mask], dim=1)
+            # Query tokens are text-like (causal attention)
+            queries_type_ids = torch.ones(B, self.num_queries, device=token_type_ids.device, dtype=token_type_ids.dtype)
+            token_type_ids = torch.cat([token_type_ids, queries_type_ids], dim=1)
+
+        # PaliGemma uses 1-indexed position_ids for RoPE
+        seq_len = inputs_embeds.shape[1]
+        cache_position = torch.arange(seq_len, device=inputs_embeds.device)
+        position_ids = (cache_position + 1).unsqueeze(0).expand(B, -1)
+
+        # Build causal mask with bidirectional attention for image tokens
+        from transformers.models.paligemma.modeling_paligemma import create_causal_mask_mapping
+        causal_mask_mapping = create_causal_mask_mapping(
+            backbone.config,
+            inputs_embeds,
+            attention_mask,
+            cache_position,
+            past_key_values=None,
+            position_ids=position_ids,
+            token_type_ids=token_type_ids,
+            pixel_values=pixel_values,
+            is_training=self.training,
+        )
 
         output_hidden_states_flag = (self.enable_future_image_loss or self.condition_type in ["tight", "soft"] )
         outputs = backbone.language_model(
             inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
+            attention_mask=causal_mask_mapping,
+            position_ids=position_ids,
             output_hidden_states=output_hidden_states_flag,
         )
         hidden_states = outputs.hidden_states if output_hidden_states_flag else None
