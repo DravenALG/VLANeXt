@@ -623,7 +623,7 @@ def train(config):
         if future_images is not None:
             future_images = future_images.to(device, dtype=torch.bfloat16)
         
-        valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw", "token_type_ids"}
+        valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw"}
         forward_args = {k: v for k, v in model_inputs.items() if k in valid_keys}
         do_update = (batch_idx + 1) % gradient_accumulation_steps == 0
         sync_context = model.no_sync if (is_distributed and not do_update) else nullcontext
