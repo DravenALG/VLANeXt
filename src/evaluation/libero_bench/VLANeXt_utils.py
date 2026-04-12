@@ -252,7 +252,7 @@ def get_vla_action(cfg, model, processor, obs, task_label):
     else:
         raise ValueError(f"Unknown input_modality: {input_modality} for model type")
 
-    valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw"}
+    valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw", "token_type_ids"}
     inputs = {k: v.to(device) for k, v in inputs.items() if k in valid_keys}
 
     if "pixel_values" in inputs:
