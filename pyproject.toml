@@ -7,7 +7,7 @@ name = "vlanext"
 version = "0.1.0"
 description = "VLANeXt: Recipes for Building Strong VLA Models"
 readme = "README.md"
-license = "S-Lab-1.0"
+license = "LicenseRef-S-Lab-1.0"
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.2",
