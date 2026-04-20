@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_dev_liberov3_goal_dct_low5_high0_v2"
+  name: "VLANeXt_dev_liberov3_goal_dct_low5_high0_v3"
   output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
@@ -124,7 +124,7 @@ model:
   gradient_checkpointing: true
 
 train:
-  seed: 42
+  seed: 0
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-4
