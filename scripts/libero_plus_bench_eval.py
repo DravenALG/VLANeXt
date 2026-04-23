@@ -86,7 +86,7 @@ def eval_libero(cfg) -> None:
     print(f"Task suite: {cfg.eval.task_suite_name}")
     log_file.write(f"Task suite: {cfg.eval.task_suite_name}\n")
 
-    json_path = Path("third_party/LIBERO-plus/libero/libero/benchmark/task_classification.json")
+    json_path = Path("/data/NTU_slab/draven/proj/third_party/LIBERO-plus/libero/libero/benchmark/task_classification.json")
     task_name_to_category = {}
     if json_path.exists():
         with open(json_path, 'r') as f:
@@ -120,9 +120,6 @@ def eval_libero(cfg) -> None:
     elif '10' in train_suite_name:
         action_min = np.array(action_min_10)
         action_max = np.array(action_max_10)
-    elif 'mixed' in train_suite_name:
-        action_min = np.array(action_min_mixed)
-        action_max = np.array(action_max_mixed)
     else:
         action_min = np.array(action_min_10)
         action_max = np.array(action_max_10)

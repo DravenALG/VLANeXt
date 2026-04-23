@@ -400,6 +400,7 @@ def train(config):
             generator_num_heads=config['model'].get('generator_num_heads', 12),
             generator_mlp_ratio=config['model'].get('generator_mlp_ratio', 4.0),
             action_vqvae=config['model'].get('action_vqvae', None),
+
             dct_loss_weight=config['model'].get('dct_loss_weight', 0.1),
             dct_low_freq_weight=config['model'].get('dct_low_freq_weight', 1.0),
             dct_high_freq_weight=config['model'].get('dct_high_freq_weight', 1.0),
@@ -622,7 +623,7 @@ def train(config):
         if future_images is not None:
             future_images = future_images.to(device, dtype=torch.bfloat16)
         
-        valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw"}
+        valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw", "token_type_ids"}
         forward_args = {k: v for k, v in model_inputs.items() if k in valid_keys}
         do_update = (batch_idx + 1) % gradient_accumulation_steps == 0
         sync_context = model.no_sync if (is_distributed and not do_update) else nullcontext

@@ -535,7 +535,7 @@ class ActionVQVAE(nn.Module):
         return action
 
 class ActionClassificationTransformerMetaquery(nn.Module):
-    def __init__(self, action_dim, condition_dim, num_actions=1, num_bins=256, 
+    def __init__(self, action_dim, condition_dim, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
                  vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3):
         super().__init__()
@@ -597,15 +597,15 @@ class ActionClassificationTransformerMetaquery(nn.Module):
             x = block(x, c)
             
         output = self.final_layer(x, c)
-        output = output[:, -self.total_queries:, :]  
-        
+        output = output[:, -self.total_queries:, :]
+
         if self.vqvae_mode:
             return output.view(B, self.num_actions, self.vq_latent_codes, self.per_dim_classes)
         else:
             return output.view(B, self.num_actions, self.action_dim, self.per_dim_classes)
 
 class ActionClassificationTransformerMoE(nn.Module):
-    def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256, 
+    def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
                  vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3, gen_hidden_size=None):
         super().__init__()
@@ -619,10 +619,10 @@ class ActionClassificationTransformerMoE(nn.Module):
         self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
         self.total_queries = num_actions * self.dim_per_action
         self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
-        
+
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, self.total_queries, hidden_size))
-        
+
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
         
         self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))
@@ -685,8 +685,8 @@ class ActionClassificationTransformerMoE(nn.Module):
             x = block(x, c, vlm_state, gen_feat=gen_state)
             
         output = self.final_layer(x, c)
-        output = output[:, -self.total_queries:, :]  
-        
+        output = output[:, -self.total_queries:, :]
+
         if self.vqvae_mode:
             return output.view(B, self.num_actions, self.vq_latent_codes, self.per_dim_classes)
         else:

@@ -87,6 +87,7 @@ def get_vla(cfg):
             gradient_checkpointing=False,
             num_bins=model_config.get('num_bins', 256),
             action_vqvae=model_config.get('action_vqvae', None),
+
             generator_hidden_size=model_config.get('generator_hidden_size', 768),
             generator_depth=model_config.get('generator_depth', 12),
             generator_num_heads=model_config.get('generator_num_heads', 12),
@@ -251,7 +252,7 @@ def get_vla_action(cfg, model, processor, obs, task_label):
     else:
         raise ValueError(f"Unknown input_modality: {input_modality} for model type")
 
-    valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw"}
+    valid_keys = {"input_ids", "attention_mask", "pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw", "token_type_ids"}
     inputs = {k: v.to(device) for k, v in inputs.items() if k in valid_keys}
 
     if "pixel_values" in inputs:

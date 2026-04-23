@@ -243,7 +243,7 @@ if __name__ == "__main__":
     from tqdm import tqdm
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--droid_path", type=str, default="/mnt/draven/data/open_x_embodiment/droid/1.0.1")
+    parser.add_argument("--droid_path", type=str, default="/mnt/NTU_slab/draven/data/open_x_embodiment/droid/1.0.1")
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--limit_traj", type=int, default=None)
     parser.add_argument("--full_sequence", action="store_true")

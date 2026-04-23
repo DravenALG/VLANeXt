@@ -1,7 +1,7 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "VLANeXt_final_libero_spatial"
-  output_dir: "/mnt/draven/checkpoints/VLANeXt"
+  name: "VLANeXt_dev_liberov3_goal_dct_low5_high0_v4"
+  output_dir: "/data/NTU_slab/draven/checkpoints/VLANeXt"
   log_interval: 10
   save_interval: 2000
   use_wandb: true
@@ -9,9 +9,9 @@ project:
 data:
   dataset_name: "libero"
   # /mnt/draven/data/LIBERO_modified
-  data_root: "/mnt/draven/data/LIBERO_modified"
+  data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
   # loptions: libero_spatial, libero_object, libero_goal, libero_10
-  task_suite_name: "libero_spatial"
+  task_suite_name: "libero_goal"
   full_sequence: true  # If true, sample every timestep; if false, subsample
 
   # number of past timesteps
@@ -84,7 +84,7 @@ model:
     num_heads: 8
     steps: 1000
     learning_rate: 1.0e-3
-  
+
   # condition type option: "loose", "tight", "soft"
   condition_type: "soft"
   # loose or soft conditioning configs (applicable if condition_type is "loose" or "soft")
@@ -111,8 +111,8 @@ model:
   # auxiliary dct loss weight (>0 activates)
   dct_loss_weight: 0.1
   dct_freq_split: 0.125
-  dct_low_freq_weight: 1.0
-  dct_high_freq_weight: 1.0
+  dct_low_freq_weight: 5.0
+  dct_high_freq_weight: 0.0
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # action condition configs
@@ -124,7 +124,7 @@ model:
   gradient_checkpointing: true
 
 train:
-  seed: 2026
+  seed: 8
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   learning_rate: 1.0e-4

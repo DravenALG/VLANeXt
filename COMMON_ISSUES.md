@@ -59,3 +59,10 @@ CUDA_VISIBLE_DEVICES=1,0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_bench_e
 **Symptom:** Warning about unexpected keys when loading a checkpoint with a LLaMA-family VLM, e.g., `text_model.xx` keys not being loaded.
 
 **Solution:** This is expected and **not** an error. Since we only use the visual part of SigLip, the text part will not be loaded. All `text_model.*` keys in the checkpoint are safely ignored.
+
+
+### 5. Import Error when using Flash Attention
+
+**Symptom:** Encounter `ImportError: xxx undefined symbol: _ZN3c105ErrorC2ENS_14SourceLocationENSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE`
+
+**Solution:** This is the flash-attention version problem. Just `pip install flash-attn==2.7.4.post1 --no-build-isolation`.
