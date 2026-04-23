@@ -111,8 +111,8 @@ model:
   # auxiliary dct loss weight (>0 activates)
   dct_loss_weight: 0.1
   dct_freq_split: 0.125
-  dct_low_freq_weight: 1.0
-  dct_high_freq_weight: 1.0
+  dct_low_freq_weight: 5.0
+  dct_high_freq_weight: 0.0
   dct_similarity_type: "mae" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # action condition configs
