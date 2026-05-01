@@ -38,3 +38,22 @@ video:hover {
     outline: none;
     box-shadow: none;
 }
+
+.publication-acceptance {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+.acceptance-badge {
+    display: inline-block;
+    font-family: 'Google Sans', sans-serif;
+    font-size: 1.05rem;
+    color: #444;
+    letter-spacing: 0.01em;
+}
+
+.acceptance-badge strong {
+    color: #c0392b;
+    font-weight: 600;
+}

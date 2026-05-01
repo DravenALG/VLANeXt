@@ -9,9 +9,13 @@
 <img src="imgs/roadmap.png" alt="roadmap of vlanext" width="60%"/>
 </p>
 
+> 🎉 **Good News!** Our paper has been accepted to **ICML 2026**!
+
 This is a PyTorch implementation of the paper: [VLANeXt: Recipes for Building Strong VLA Models](), and also a **unified**, **easy-to-use** codebase that standardizes training and evaluation while exposing the key components of the VLA design space. It is intentionally lightweight and minimally encapsulated, enabling researchers to reproduce results, probe alternative design choices, and build new VLA variants on a shared, transparent foundation. We also release a [curated and continuously updated list of VLA & WAM research](https://github.com/DravenALG/awesome-vla-wam) (Awesome VLA & WAM) to help better understand the development of VLAs.
 
 **Xiao-Ming Wu**, Bin Fan, Kang Liao, Jian-Jian Jiang, Runze Yang, Yihang Luo, Zhonghua Wu, Wei-Shi Zheng, Chen Change Loy*.
+
+S-Lab, Nanyang Technological University; Sun Yat-sen University; ACE Robotics.
 
 <p align="center">
 <img src="imgs/VLANeXt_codebase.png" alt="codebase overview" width="80%"/>
