@@ -285,7 +285,7 @@ data:
 
 
 #### Implementation Details
-- When `future_image_loss_weight > 0`, the model loads a frozen **Emu3.5 VisionTokenizer** (`Emu3p5VisionVQModel`) to encode future images into discrete visual tokens.
+- When `future_image_loss_weight > 0`, the model loads a frozen **Emu3.5 VisionTokenizer** (`Emu3p5VisionVQModel`) to encode future images into discrete visual tokens. If you want to try this, just let future_image_loss_weight = 1 to activate it. 
 - An `ImageGeneratorTransformer` (`src/models/generator.py`) is trained autoregressively to predict these visual tokens, conditioned on VLM hidden states via layer-wise cross-attention.
 - The total loss becomes: `loss = action_loss + future_image_loss_weight * image_generation_loss`.
 - `future_image_mode: "horizon"` uses the image at the end of the action chunk horizon; `"last"` can select the final frame of the episode.
