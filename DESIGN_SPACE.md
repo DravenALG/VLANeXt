@@ -285,7 +285,7 @@ data:
 
 
 #### Implementation Details
-- When `future_image_loss_weight > 0`, the model loads a frozen **Emu3.5 VisionTokenizer** (`Emu3p5VisionVQModel`) to encode future images into discrete visual tokens. If you want to try this, just let future_image_loss_weight = 1 to activate it. 
+- When `future_image_loss_weight > 0`, the model loads a frozen **Emu3.5 VisionTokenizer** (`Emu3p5VisionVQModel`) to encode future images into discrete visual tokens. If you want to try this, just let `future_image_loss_weight = 1` to activate it. 
 - An `ImageGeneratorTransformer` (`src/models/generator.py`) is trained autoregressively to predict these visual tokens, conditioned on VLM hidden states via layer-wise cross-attention.
 - The total loss becomes: `loss = action_loss + future_image_loss_weight * image_generation_loss`.
 - `future_image_mode: "horizon"` uses the image at the end of the action chunk horizon; `"last"` can select the final frame of the episode.
@@ -315,7 +315,7 @@ model:
 ```
 
 #### Implementation Details
-- When `dct_loss_weight > 0`, a **Discrete Cosine Transform (DCT)** loss is computed in addition to the primary action loss. Using weights from 0.1-0.5 is okay.
+- When `dct_loss_weight > 0`, a **Discrete Cosine Transform (DCT)** loss is computed in addition to the primary action loss.
 - `dct_freq_split` controls the boundary between low- and high-frequency bands; `dct_low_freq_weight` and `dct_high_freq_weight` scale the loss contribution of each band independently. When action chunk is 8, using 0.125 - 0.375 split works good. Low frequencies are more helpful than high frequencies.
 - `dct_similarity_type` selects the per-element distance metric applied in the DCT domain: `"mse"` (squared error), `"mae"` (absolute error), or `"cosine"` (cosine distance). Note that `"cosine"` may require a smaller `dct_loss_weight` for stable training. 
 - The total loss becomes: `loss = primary_loss + dct_loss_weight * dct_loss`.
