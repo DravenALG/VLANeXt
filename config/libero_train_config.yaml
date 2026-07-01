@@ -126,7 +126,7 @@ model:
 
   # policy configs
   policy_hidden_size: 1024  # 1024 in default
-  policy_depth: 24  # 24 for 0.8 and 2B, 32 for 4B
+  policy_depth: 24  # 24 for Qwen3.5 0.8 and Qwen3.5 2B, 32 for Qwen3.5 4B; 30 for Wan2.2-TI2V-5B
   policy_num_heads: 16
   policy_mlp_ratio: 4.0
 
