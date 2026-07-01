@@ -645,7 +645,7 @@ model:
 
 These parameters are active only when `model.lmm_path` contains `wan`.
 
-- `model.video_generation_loss_weight`: weight for WAN future-video generation loss.
+- `model.video_generation_loss_weight`: weight for WAN future-video generation loss. If enable, simply using 1.0 is OK.
 - `model.wan_action_condition_mode`: `fast` conditions action on first-frame video tokens; `joint` conditions action on first-frame and future-video tokens together.
 - `model.wan_tokenizer_model_id`: text tokenizer/encoder model ID used by WAN. The common choice is `google/umt5-xxl`.
 - `model.wan_prompt_template`: prompt template. It can use `{instruction}` and `{task}`.
@@ -682,7 +682,7 @@ model:
 
 #### Parameters
 
-- `model.future_image_loss_weight`: enables future-image/world-modeling loss when `> 0`.
+- `model.future_image_loss_weight`: enables future-image/world-modeling loss when `> 0`. If enable, simply using 1.0 is OK.
 - `model.future_image_prediction_type`: `emu_token` or `dinov3_flow`.
   - `emu_token`: predicts Emu vision-token IDs with cross entropy.
   - `dinov3_flow`: predicts DINOv3 patch features with flow matching.
@@ -723,7 +723,7 @@ model:
 
 #### Parameters
 
-- `model.dct_loss_weight`: enables DCT loss when `> 0`.
+- `model.dct_loss_weight`: enables DCT loss when `> 0`. If enable, simply using 0.1 is OK.
 - `model.dct_freq_split`: fraction of the temporal frequency axis treated as low frequency.
 - `model.dct_low_freq_weight`: weight for low-frequency DCT coefficients.
 - `model.dct_high_freq_weight`: weight for high-frequency DCT coefficients.
@@ -746,7 +746,7 @@ model:
 
 #### Parameters
 
-- `model.language_action_loss_weight`: enables auxiliary language-action supervision when `> 0`.
+- `model.language_action_loss_weight`: enables auxiliary language-action supervision when `> 0`. If enable, simply using 1.0 is OK.
 - `model.policy_gradient_stop_for_vlm`: when `true`, stops action-policy gradients from flowing into the VLM hidden states.
 - `model.language_action_format`: `vla-0`, `lap`.
   - `vla-0`: outputs integer tokens in normalized action space.
