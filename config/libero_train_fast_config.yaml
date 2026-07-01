@@ -1,0 +1,20 @@
+data:
+  # train_FAST.py expects a TFDS builder directory at:
+  #   ${data_root}/${task_suite_name}/${version}
+  data_root: "/data/NTU_slab/draven/data/LIBERO_modified"
+  version: "1.0.0"
+  # options: libero_spatial, libero_object, libero_goal, libero_10, libero_mixed
+  task_suite_name: "libero_mixed"
+  # optional action stats override; empty/null uses task_suite_name
+  normalization_suite_name: "libero_mixed"
+  future_len: 8
+
+model:
+  action_dim: 7
+
+fast:
+  output_dir: "src/models/fast_tokenizer/libero_mixed"
+  # null = use all trajectories per suite
+  max_trajs: null
+  scale: 10.0
+  vocab_size: 2048

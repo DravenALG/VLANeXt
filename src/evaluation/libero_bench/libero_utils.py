@@ -7,7 +7,7 @@ import imageio
 import numpy as np
 import tensorflow as tf
 from libero.libero import get_libero_path
-from libero.libero.envs import OffScreenRenderEnv
+from libero.libero.envs import OffScreenRenderEnv, SubprocVectorEnv
 
 from src.evaluation.libero_bench.robot_utils import (
     DATE,
@@ -23,6 +23,30 @@ def get_libero_env(task, model_family, resolution=256):
     env = OffScreenRenderEnv(**env_args)
     env.seed(0)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
     return env, task_description
+
+
+def make_libero_env_fn(task, resolution=256):
+    """Build a pickleable factory for one LIBERO task environment."""
+    task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
+    env_args = {
+        "bddl_file_name": task_bddl_file,
+        "camera_heights": resolution,
+        "camera_widths": resolution,
+    }
+
+    def _make_env(env_args=env_args):
+        env = OffScreenRenderEnv(**env_args)
+        env.seed(0)
+        return env
+
+    return _make_env
+
+
+def get_libero_vector_env(tasks, resolution=256):
+    """Create a SubprocVectorEnv whose workers may belong to different tasks."""
+    env = SubprocVectorEnv([make_libero_env_fn(task, resolution=resolution) for task in tasks])
+    task_descriptions = [task.language for task in tasks]
+    return env, task_descriptions
 
 
 def get_libero_dummy_action(model_family: str):
@@ -78,7 +102,7 @@ def get_libero_image(obs, resize_size, center_crop: bool = False, center_crop_ra
     return img
 
 
-def save_rollout_video(rollout_images, idx, success, task_description, log_file=None, save_dir="./rollouts", fps=20):
+def save_rollout_video(rollout_images, idx, success, task_description, logger=None, log_file=None, save_dir="./rollouts", fps=20):
     """Saves an MP4 replay of an episode."""
     os.makedirs(save_dir, exist_ok=True)
     processed_task_description = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")
@@ -92,8 +116,9 @@ def save_rollout_video(rollout_images, idx, success, task_description, log_file=
     for img in rollout_images:
         video_writer.append_data(img)
     video_writer.close()
-    print(f"Saved rollout MP4 at path {mp4_path}")
-    if log_file is not None:
+    if logger is not None:
+        logger.info("Saved rollout MP4 at path %s", mp4_path)
+    elif log_file is not None:
         log_file.write(f"Saved rollout MP4 at path {mp4_path}\n")
     return mp4_path
 

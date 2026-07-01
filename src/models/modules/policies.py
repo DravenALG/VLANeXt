@@ -2,13 +2,23 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 # -----------------------------------------------------------------------------
 # ----------------------------- Shared Components -----------------------------
 # -----------------------------------------------------------------------------
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+def build_causal_action_mask(history_len, action_len, device, kv_extra_len=0):
+    total_len = history_len + action_len
+    mask = torch.zeros(total_len, total_len + kv_extra_len, device=device, dtype=torch.bool)
+
+    if history_len > 0:
+        mask[:history_len, history_len:history_len + action_len] = True
+
+    future_mask = torch.ones(action_len, action_len, device=device, dtype=torch.bool).triu(1)
+    mask[history_len:, history_len:history_len + action_len] = future_mask
+    return mask
 
 class MetaQueryBlock(nn.Module):
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0):
@@ -43,12 +53,8 @@ class MoEBlock(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
         self.vlm_proj = nn.Linear(vlm_hidden_size, hidden_size)
-        
-        if gen_hidden_size is not None:
-            self.gen_proj = nn.Linear(gen_hidden_size, hidden_size)
-        else:
-            self.gen_proj = None
-            
+        self.gen_proj = nn.Linear(gen_hidden_size, hidden_size) if gen_hidden_size is not None else None
+
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         self.mlp = nn.Sequential(
@@ -61,20 +67,17 @@ class MoEBlock(nn.Module):
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c, vlm_feat, gen_feat=None):
+    def forward(self, x, c, vlm_feat, gen_feat=None, attn_mask=None):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
         x_norm = modulate(self.norm1(x), shift_msa, scale_msa)
-        
+
         v_feat = self.vlm_proj(vlm_feat)
         kv_list = [x_norm, v_feat]
-        
         if gen_feat is not None and self.gen_proj is not None:
-            g_feat = self.gen_proj(gen_feat)
-            kv_list.append(g_feat)
-            
+            kv_list.append(self.gen_proj(gen_feat))
         kv = torch.cat(kv_list, dim=1)
-        
-        attn_out, _ = self.attn(query=x_norm, key=kv, value=kv)
+
+        attn_out, _ = self.attn(query=x_norm, key=kv, value=kv, attn_mask=attn_mask)
         
         x = x + gate_msa.unsqueeze(1) * attn_out
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
@@ -188,11 +191,12 @@ class ActionDiffusionTransformerMoE(nn.Module):
         super().__init__()
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.t_embedder = TimestepEmbedder(hidden_size)
-        
+
         self.pos_embed = nn.Parameter(torch.zeros(1, 256, hidden_size))
-        
+
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size) for _ in range(depth)
+            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            for _ in range(depth)
         ])
         self.final_layer = FinalLayer1D(hidden_size, action_dim)
         self.initialize_weights()
@@ -215,7 +219,7 @@ class ActionDiffusionTransformerMoE(nn.Module):
 
     def forward(self, noisy_action, timestep, vlm_hidden_states, history_actions=None, gen_hidden_states=None):
         noisy_action = noisy_action.to(dtype=self.input_proj.weight.dtype)
-        
+
         if history_actions is not None:
             history_actions = history_actions.to(dtype=self.input_proj.weight.dtype)
             x_input = torch.cat([history_actions, noisy_action], dim=1)
@@ -225,19 +229,18 @@ class ActionDiffusionTransformerMoE(nn.Module):
         x = self.input_proj(x_input)
         x = x + self.pos_embed[:, :x.shape[1], :]
         t = self.t_embedder(timestep)
-        
+
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
-        
         relevant_gen_states = [None] * len(self.blocks)
         if gen_hidden_states is not None:
             relevant_gen_states = gen_hidden_states[-len(self.blocks):]
-        
+
         for block, vlm_state, gen_state in zip(self.blocks, relevant_vlm_states, relevant_gen_states):
             vlm_state = vlm_state.to(dtype=x.dtype)
             if gen_state is not None:
                 gen_state = gen_state.to(dtype=x.dtype)
             x = block(x, t, vlm_state, gen_feat=gen_state)
-            
+
         output = self.final_layer(x, t)
         
         if history_actions is not None:
@@ -310,16 +313,17 @@ class ActionRegressionTransformerMoE(nn.Module):
         super().__init__()
         self.num_actions = num_actions
         self.action_dim = action_dim
-        
+
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, num_actions, hidden_size))
-        
+
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
-        
+
         self.pos_embed = nn.Parameter(torch.zeros(1, 256, hidden_size))
-        
+
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size) for _ in range(depth)
+            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            for _ in range(depth)
         ])
         self.final_layer = FinalLayer1D(hidden_size, action_dim)
         self.initialize_weights()
@@ -342,214 +346,64 @@ class ActionRegressionTransformerMoE(nn.Module):
 
     def forward(self, condition, history_actions=None, gen_hidden_states=None):
         vlm_hidden_states = condition
-        
+
         final_state = vlm_hidden_states[-1]
         dtype = self.input_proj.weight.dtype
         final_state = final_state.to(dtype=dtype)
-        
-        c_emb = final_state.mean(dim=1) 
+
+        c_emb = final_state.mean(dim=1)
         c = self.cond_proj(c_emb)
-        
+
         B = c.shape[0]
 
         queries = self.query_embed.expand(B, -1, -1).to(dtype=dtype)
-        
+
         if history_actions is not None:
             history_emb = self.input_proj(history_actions.to(dtype=dtype))
             x = torch.cat([history_emb, queries], dim=1)
         else:
             x = queries
-            
+
         x = x + self.pos_embed[:, :x.shape[1], :]
-        
+
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
-        
         relevant_gen_states = [None] * len(self.blocks)
         if gen_hidden_states is not None:
             relevant_gen_states = gen_hidden_states[-len(self.blocks):]
-        
+
         for block, vlm_state, gen_state in zip(self.blocks, relevant_vlm_states, relevant_gen_states):
             vlm_state = vlm_state.to(dtype=dtype)
             if gen_state is not None:
                 gen_state = gen_state.to(dtype=dtype)
             x = block(x, c, vlm_state, gen_feat=gen_state)
-            
+
         output = self.final_layer(x, c)
         output = output[:, -self.num_actions:, :]
-        
+
         return output
 
 # -----------------------------------------------------------------------------
 # --------------------------- Classification Policies -------------------------
 # -----------------------------------------------------------------------------
-class VectorQuantizer(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25, decay=0.99, epsilon=1e-5):
-        super().__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.commitment_cost = commitment_cost
-        
-        self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim)
-        self.embedding.weight.data.normal_(0, 0.02)
-        self.embedding.weight.requires_grad = False
-
-        self.decay = decay
-        self.epsilon = epsilon
-        
-        self.register_buffer("ema_cluster_size", torch.zeros(num_embeddings))
-        self.register_buffer("ema_w", torch.Tensor(num_embeddings, embedding_dim))
-        self.ema_w.data.normal_(0, 0.02)
-
-    def forward(self, inputs):
-        input_shape = inputs.shape
-        flat_input = inputs.view(-1, self.embedding_dim)
-        
-        weight = self.embedding.weight.to(dtype=inputs.dtype)
-        
-        distances = (torch.sum(flat_input**2, dim=1, keepdim=True) 
-                    + torch.sum(weight**2, dim=1)
-                    - 2 * torch.matmul(flat_input, weight.t()))
-            
-        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
-        
-        encodings = torch.zeros(
-            encoding_indices.shape[0], 
-            self.num_embeddings, 
-            device=inputs.device,
-            dtype=inputs.dtype
-        )
-        encodings.scatter_(1, encoding_indices, 1)
-        
-        quantized = torch.matmul(encodings, weight).view(input_shape)
-        
-        if self.training:
-            with torch.no_grad():
-                _encodings_sum = encodings.sum(0).to(dtype=self.ema_cluster_size.dtype)
-                _dw = torch.matmul(encodings.t(), flat_input).to(dtype=self.ema_w.dtype)
-                
-                self.ema_cluster_size.data.mul_(self.decay).add_(_encodings_sum, alpha=1 - self.decay)
-                
-                self.ema_w.data.mul_(self.decay).add_(_dw, alpha=1 - self.decay)
-                
-                dead_codes = self.ema_cluster_size < 1.0
-                if dead_codes.any():
-                    num_dead = dead_codes.sum().item()
-                    n_samples = flat_input.shape[0]
-                    if n_samples >= num_dead:
-                        rand_idx = torch.randperm(n_samples, device=inputs.device)[:num_dead]
-                        chosen_inputs = flat_input[rand_idx].to(dtype=self.ema_w.dtype)
-                        
-                        self.ema_cluster_size[dead_codes] = 1.0
-                        self.ema_w[dead_codes] = chosen_inputs
-
-                n = self.ema_cluster_size.sum()
-                cluster_size = (
-                    (self.ema_cluster_size + self.epsilon) / 
-                    (n + self.num_embeddings * self.epsilon) * n
-                )
-                
-                self.embedding.weight.data.copy_( (self.ema_w / cluster_size.unsqueeze(1)).to(dtype=self.embedding.weight.dtype) )
-        
-        e_latent_loss = F.mse_loss(quantized.detach(), inputs)
-        q_latent_loss = F.mse_loss(quantized, inputs.detach())
-        
-        loss = q_latent_loss + self.commitment_cost * e_latent_loss
-        
-        quantized = inputs + (quantized - inputs).detach()
-        return loss, quantized, encoding_indices.view(input_shape[:-1])
-
-class ActionVQVAE(nn.Module):
-    def __init__(self, action_dim=7, latent_codes_per_step=3, codebook_size=1024, hidden_size=256, depth=2, num_heads=4):
-        super().__init__()
-        self.latent_codes = latent_codes_per_step
-        self.codebook_size = codebook_size
-        self.hidden_size = hidden_size
-        
-        self.in_proj = nn.Linear(action_dim, hidden_size)
-        self.enc_pos = nn.Parameter(torch.zeros(1, 1024, hidden_size))
-        enc_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_heads, dim_feedforward=hidden_size*4, batch_first=True)
-        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=depth)
-        self.to_latent = nn.Linear(hidden_size, latent_codes_per_step * hidden_size)
-        
-        self.pre_vq_norm = nn.LayerNorm(hidden_size, eps=1e-6)
-
-        self.vq = VectorQuantizer(codebook_size, hidden_size, commitment_cost=0.25, decay=0.99)
-        
-        self.from_latent = nn.Linear(latent_codes_per_step * hidden_size, hidden_size)
-        self.dec_pos = nn.Parameter(torch.zeros(1, 1024, hidden_size))
-        dec_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_heads, dim_feedforward=hidden_size*4, batch_first=True)
-        self.decoder = nn.TransformerEncoder(dec_layer, num_layers=depth)
-        self.out_proj = nn.Linear(hidden_size, action_dim)
-
-    def forward(self, actions):
-        loss, _, _ = self.encode(actions)
-        return loss
-
-    def encode(self, actions):
-        B, T, _ = actions.shape
-        x = self.in_proj(actions)
-        x = x + self.enc_pos[:, :T, :]
-        x = self.encoder(x)
-        
-        latents_flat = self.to_latent(x)
-        latents = latents_flat.view(B, T, self.latent_codes, self.hidden_size)
-        
-        latents = self.pre_vq_norm(latents)
-
-        loss, quantized, indices = self.vq(latents)
-        
-        quantized_flat = quantized.view(B, T, -1)
-        dec_in = self.from_latent(quantized_flat)
-        dec_in = dec_in + self.dec_pos[:, :T, :]
-        dec_out = self.decoder(dec_in)
-        recon = self.out_proj(dec_out)
-        
-        recon_loss = F.mse_loss(recon, actions)
-        total_loss = recon_loss + loss
-        
-        return total_loss, indices, quantized
-
-    def decode_indices(self, indices):
-        B, T, _ = indices.shape
-        indices_flat = indices.view(-1)
-        
-        codes = self.vq.embedding(indices_flat)
-        codes = codes.view(B, T, self.latent_codes, self.hidden_size)
-        
-        codes_flat = codes.view(B, T, -1)
-        dec_in = self.from_latent(codes_flat)
-        dec_in = dec_in + self.dec_pos[:, :T, :]
-        dec_out = self.decoder(dec_in)
-        action = self.out_proj(dec_out)
-        return action
-
-    def decode_probs(self, probs):
-        B, T, L, C = probs.shape
-        codes = torch.matmul(probs, self.vq.embedding.weight)
-        
-        codes_flat = codes.view(B, T, -1)
-        dec_in = self.from_latent(codes_flat)
-        dec_in = dec_in + self.dec_pos[:, :T, :]
-        dec_out = self.decoder(dec_in)
-        action = self.out_proj(dec_out)
-        return action
-
 class ActionClassificationTransformerMetaquery(nn.Module):
     def __init__(self, action_dim, condition_dim, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
-                 vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3):
+                 fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048):
         super().__init__()
         self.num_actions = num_actions
         self.action_dim = action_dim
         self.num_bins = num_bins
-        self.vqvae_mode = vqvae_mode
-        self.vq_codebook_size = vq_codebook_size
-        self.vq_latent_codes = vq_latent_codes
+        self.fast_mode = fast_mode
+        self.fast_vocab_size = fast_vocab_size
         self.pose_dim = action_dim - 1
 
-        self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
-        self.total_queries = num_actions * self.dim_per_action
-        self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
+        if fast_mode:
+            self.total_queries = fast_expected_seq_len
+            self.per_dim_classes = fast_vocab_size
+        else:
+            self.dim_per_action = action_dim
+            self.total_queries = num_actions * self.dim_per_action
+            self.per_dim_classes = num_bins
         
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, self.total_queries, hidden_size))
@@ -597,40 +451,45 @@ class ActionClassificationTransformerMetaquery(nn.Module):
             x = block(x, c)
             
         output = self.final_layer(x, c)
-        output = output[:, -self.total_queries:, :]
-
-        if self.vqvae_mode:
-            return output.view(B, self.num_actions, self.vq_latent_codes, self.per_dim_classes)
+        output = output[:, -self.total_queries:, :]  
+        
+        if self.fast_mode:
+            return output  # (B, fast_expected_seq_len, fast_vocab_size)
         else:
             return output.view(B, self.num_actions, self.action_dim, self.per_dim_classes)
 
 class ActionClassificationTransformerMoE(nn.Module):
     def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
-                 vqvae_mode=False, vq_codebook_size=1024, vq_latent_codes=3, gen_hidden_size=None):
+                 fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048,
+                 gen_hidden_size=None):
         super().__init__()
         self.num_actions = num_actions
         self.action_dim = action_dim
         self.num_bins = num_bins
-        self.vqvae_mode = vqvae_mode
-        self.vq_codebook_size = vq_codebook_size
-        self.vq_latent_codes = vq_latent_codes
+        self.fast_mode = fast_mode
+        self.fast_vocab_size = fast_vocab_size
 
-        self.dim_per_action = vq_latent_codes if vqvae_mode else action_dim
-        self.total_queries = num_actions * self.dim_per_action
-        self.per_dim_classes = vq_codebook_size if vqvae_mode else num_bins
+        if fast_mode:
+            self.total_queries = fast_expected_seq_len
+            self.per_dim_classes = fast_vocab_size
+        else:
+            self.dim_per_action = action_dim
+            self.total_queries = num_actions * self.dim_per_action
+            self.per_dim_classes = num_bins
 
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.query_embed = nn.Parameter(torch.zeros(1, self.total_queries, hidden_size))
 
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
-        
+
         self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))
-        
+
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size) for _ in range(depth)
+            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            for _ in range(depth)
         ])
-        
+
         self.final_layer = FinalLayer1D(hidden_size, self.per_dim_classes)
         self.initialize_weights()
 
@@ -652,42 +511,229 @@ class ActionClassificationTransformerMoE(nn.Module):
 
     def forward(self, condition, history_actions=None, gen_hidden_states=None):
         vlm_hidden_states = condition
-        
+
         final_state = vlm_hidden_states[-1]
         dtype = self.input_proj.weight.dtype
         final_state = final_state.to(dtype=dtype)
-        
-        c_emb = final_state.mean(dim=1) 
+
+        c_emb = final_state.mean(dim=1)
         c = self.cond_proj(c_emb)
-        
+
         B = c.shape[0]
 
         queries = self.query_embed.expand(B, -1, -1).to(dtype=dtype)
-        
+
         if history_actions is not None:
             history_emb = self.input_proj(history_actions.to(dtype=dtype))
             x = torch.cat([history_emb, queries], dim=1)
         else:
             x = queries
-            
+
         x = x + self.pos_embed[:, :x.shape[1], :]
-        
+
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
-        
         relevant_gen_states = [None] * len(self.blocks)
         if gen_hidden_states is not None:
             relevant_gen_states = gen_hidden_states[-len(self.blocks):]
-        
+
         for block, vlm_state, gen_state in zip(self.blocks, relevant_vlm_states, relevant_gen_states):
             vlm_state = vlm_state.to(dtype=dtype)
             if gen_state is not None:
                 gen_state = gen_state.to(dtype=dtype)
             x = block(x, c, vlm_state, gen_feat=gen_state)
-            
+
         output = self.final_layer(x, c)
         output = output[:, -self.total_queries:, :]
 
-        if self.vqvae_mode:
-            return output.view(B, self.num_actions, self.vq_latent_codes, self.per_dim_classes)
+        if self.fast_mode:
+            return output  # (B, fast_expected_seq_len, fast_vocab_size)
         else:
             return output.view(B, self.num_actions, self.action_dim, self.per_dim_classes)
+
+
+class _AutoregressiveClassificationMixin:
+    def _setup_ar_tokens(self, hidden_size, total_queries, per_dim_classes):
+        self.total_queries = total_queries
+        self.per_dim_classes = per_dim_classes
+        self.token_embed = nn.Embedding(per_dim_classes, hidden_size)
+        self.bos_embed = nn.Parameter(torch.zeros(1, 1, hidden_size))
+
+    def _init_ar_weights(self):
+        nn.init.normal_(self.token_embed.weight, std=0.02)
+        nn.init.normal_(self.bos_embed, std=0.02)
+
+    def _build_ar_inputs(self, batch_size, dtype, device, target_ids=None, generated_ids=None):
+        if target_ids is not None and generated_ids is not None:
+            raise ValueError("Provide either target_ids or generated_ids, not both.")
+
+        if target_ids is not None:
+            target_ids = target_ids.to(device=device, dtype=torch.long)
+            action_len = target_ids.shape[1]
+            prev_ids = target_ids[:, :-1]
+        elif generated_ids is not None:
+            prev_ids = generated_ids.to(device=device, dtype=torch.long)
+            action_len = prev_ids.shape[1] + 1
+        else:
+            prev_ids = torch.empty(batch_size, 0, device=device, dtype=torch.long)
+            action_len = 1
+
+        if action_len > self.total_queries:
+            raise ValueError(f"AR sequence length {action_len} exceeds max length {self.total_queries}.")
+
+        invalid = (prev_ids < 0) | (prev_ids >= self.per_dim_classes)
+        prev_ids = prev_ids.masked_fill(invalid, self.per_dim_classes - 1)
+        bos = self.bos_embed.expand(batch_size, -1, -1).to(dtype=dtype)
+        prev_emb = self.token_embed(prev_ids).to(dtype=dtype)
+        return torch.cat([bos, prev_emb], dim=1), action_len
+
+
+class ActionClassificationTransformerMetaqueryAutoregressive(_AutoregressiveClassificationMixin, nn.Module):
+    def __init__(self, action_dim, condition_dim, num_actions=1, num_bins=256,
+                 hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
+                 fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048):
+        super().__init__()
+        self.num_actions = num_actions
+        self.action_dim = action_dim
+        self.num_bins = num_bins
+        self.fast_mode = fast_mode
+        self.fast_vocab_size = fast_vocab_size
+
+        total_queries = fast_expected_seq_len if fast_mode else num_actions * action_dim
+        per_dim_classes = fast_vocab_size if fast_mode else num_bins
+
+        self.input_proj = nn.Linear(action_dim, hidden_size)
+        self._setup_ar_tokens(hidden_size, total_queries, per_dim_classes)
+        self.cond_proj = nn.Linear(condition_dim, hidden_size)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))
+
+        self.blocks = nn.ModuleList([
+            MetaQueryBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
+        ])
+
+        self.final_layer = FinalLayer1D(hidden_size, self.per_dim_classes)
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        nn.init.normal_(self.pos_embed, std=0.02)
+        self._init_ar_weights()
+        nn.init.xavier_uniform_(self.input_proj.weight)
+        nn.init.xavier_uniform_(self.cond_proj.weight)
+        for block in self.blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.linear.weight, 0)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+
+    def forward(self, condition, target_ids=None, generated_ids=None, history_actions=None):
+        B = condition.shape[0]
+        dtype = self.input_proj.weight.dtype
+        device = condition.device
+        condition = condition.to(dtype=dtype)
+
+        action_emb, action_len = self._build_ar_inputs(
+            B, dtype, device, target_ids=target_ids, generated_ids=generated_ids
+        )
+        history_len = 0
+        if history_actions is not None:
+            hist_emb = self.input_proj(history_actions.to(device=device, dtype=dtype))
+            history_len = hist_emb.shape[1]
+            x = torch.cat([hist_emb, action_emb], dim=1)
+        else:
+            x = action_emb
+
+        x = x + self.pos_embed[:, :x.shape[1], :]
+        c = self.cond_proj(condition)
+        attn_mask = build_causal_action_mask(history_len, action_len, x.device)
+
+        for block in self.blocks:
+            x = block(x, c, attn_mask=attn_mask)
+
+        output = self.final_layer(x, c)
+        return output[:, -action_len:, :]
+
+
+class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassificationMixin, nn.Module):
+    def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256,
+                 hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
+                 fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048,
+                 gen_hidden_size=None):
+        super().__init__()
+        self.num_actions = num_actions
+        self.action_dim = action_dim
+        self.num_bins = num_bins
+        self.fast_mode = fast_mode
+        self.fast_vocab_size = fast_vocab_size
+
+        total_queries = fast_expected_seq_len if fast_mode else num_actions * action_dim
+        per_dim_classes = fast_vocab_size if fast_mode else num_bins
+
+        self.input_proj = nn.Linear(action_dim, hidden_size)
+        self._setup_ar_tokens(hidden_size, total_queries, per_dim_classes)
+        self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
+        self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))
+
+        self.blocks = nn.ModuleList([
+            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            for _ in range(depth)
+        ])
+
+        self.final_layer = FinalLayer1D(hidden_size, self.per_dim_classes)
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        nn.init.normal_(self.pos_embed, std=0.02)
+        self._init_ar_weights()
+        nn.init.xavier_uniform_(self.input_proj.weight)
+        nn.init.xavier_uniform_(self.cond_proj.weight)
+        for block in self.blocks:
+            nn.init.xavier_uniform_(block.vlm_proj.weight)
+            if block.gen_proj is not None:
+                nn.init.xavier_uniform_(block.gen_proj.weight)
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.linear.weight, 0)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+
+    def forward(self, condition, target_ids=None, generated_ids=None, history_actions=None, gen_hidden_states=None):
+        vlm_hidden_states = condition
+        final_state = vlm_hidden_states[-1]
+        dtype = self.input_proj.weight.dtype
+        device = final_state.device
+        final_state = final_state.to(dtype=dtype)
+
+        c = self.cond_proj(final_state.mean(dim=1))
+        B = c.shape[0]
+        action_emb, action_len = self._build_ar_inputs(
+            B, dtype, device, target_ids=target_ids, generated_ids=generated_ids
+        )
+
+        history_len = 0
+        if history_actions is not None:
+            history_emb = self.input_proj(history_actions.to(device=device, dtype=dtype))
+            history_len = history_emb.shape[1]
+            x = torch.cat([history_emb, action_emb], dim=1)
+        else:
+            x = action_emb
+
+        x = x + self.pos_embed[:, :x.shape[1], :]
+
+        relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
+        relevant_gen_states = [None] * len(self.blocks)
+        if gen_hidden_states is not None:
+            relevant_gen_states = gen_hidden_states[-len(self.blocks):]
+
+        for block, vlm_state, gen_state in zip(self.blocks, relevant_vlm_states, relevant_gen_states):
+            vlm_state = vlm_state.to(dtype=dtype)
+            if gen_state is not None:
+                gen_state = gen_state.to(dtype=dtype)
+            uses_gen = gen_state is not None and block.gen_proj is not None
+            kv_extra_len = vlm_state.shape[1] + (gen_state.shape[1] if uses_gen else 0)
+            attn_mask = build_causal_action_mask(history_len, action_len, x.device, kv_extra_len=kv_extra_len)
+            x = block(x, c, vlm_state, gen_feat=gen_state, attn_mask=attn_mask)
+
+        output = self.final_layer(x, c)
+        return output[:, -action_len:, :]

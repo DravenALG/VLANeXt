@@ -1,0 +1,80 @@
+project:
+  name: "codebase_lam_libero_mixed_vq"
+  output_dir: "/data/NTU_slab/draven/checkpoints/codebase_lam"
+  log_interval: 10
+  save_interval: 2000
+  use_wandb: true
+  wandb_project: "VLANeXt-LAM"
+
+data:
+  dataset_name: "libero"
+  dataset_format: "lerobot"
+  data_root: "/data/NTU_slab/draven/data/LIBERO_fastwam"
+  task_suite_name: "libero_mixed"
+  normalization_suite_name: "libero_mixed"
+  action_mode: "libero"
+
+  # LAM uses strict adjacent pairs image_t -> image_(t+1).
+  future_len: 1
+  full_sequence: true
+  sampling_rate: 1.0
+  allow_end_padding: false
+
+  image_resize_size: 256
+  view_mode: "multi"  # options: single, multi
+
+  batch_size: 128
+  max_steps: 50000
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  drop_last: true
+  buffer_size: 10000
+
+  augmentation:
+    enabled: true
+    brightness: 0.1
+    contrast: 0.1
+    noise_std: 0.01
+
+model:
+  # options: vae, vq, vicreg
+  lam_type: "vq"
+  latent_dim: 7
+  hidden_size: 96
+
+  # input_channels defaults to 6 for multi-view and 3 for single-view.
+  # input_channels: 6
+
+  recon_l1_weight: 1.0
+  recon_mse_weight: 0.1
+
+  # VAE constraint
+  kl_weight: 1.0e-4
+
+  # VQ constraint
+  codebook_size: 128
+  commitment_weight: 0.25
+  vq_weight: 1.0
+
+  # VICReg constraint
+  vicreg_invariance_weight: 25.0
+  vicreg_variance_weight: 25.0
+  vicreg_covariance_weight: 1.0
+  min_std: 1.0
+
+train:
+  seed: 42
+  resume_path: ""
+  learning_rate: 3.0e-4
+  scheduler: "cosine_decay"
+  weight_decay: 1.0e-4
+  warmup_steps: 1000
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  device: "cuda"
+  distributed: true
+  dist_backend: "nccl"
+  autocast: true
+  mixed_precision: "bf16"

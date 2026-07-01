@@ -1,19 +1,27 @@
 # for VLANeXt
 huggingface_hub
-transformers==5.1.0
+transformers==5.5.0
 diffusers==0.36.0
 datasets
-accelerator
+accelerate>=1.1.1
 evaluate
 deepspeed
+sentencepiece
 wandb
 h5py
 opencv-python
 tensorflow==2.18.0
 tensorflow-datasets==4.9.9
+tensorflow-metadata==1.17.3
 matplotlib
 rlds
 dm-reverb
+
+# for kairos
+mmengine==0.10.7
+modelscope==1.33.0
+ftfy==6.3.1
+wcwidth==0.2.13
 
 # for LIBERO benchmark
 imageio[ffmpeg]

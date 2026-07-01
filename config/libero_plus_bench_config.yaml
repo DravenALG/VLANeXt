@@ -8,11 +8,15 @@ model:
   diffusion_steps: 5
   scheduler_type: "flow_match" # Options: "ddpm", "ddim", "flow_match"
 
+project:
+  use_wandb: false
+
 eval:
-  finetuned_checkpoint: "" # Path to the finetuned model checkpoint
-  task_suite_name: "libero_spatial" # Options: libero_spatial, libero_object, libero_goal, libero_10
+  finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/codebase/codebase_v2_libero/10_qwen3vl2b_steps30k_train_on_libero_plus/checkpoint_final.pt" # Path to the finetuned model checkpoint
+  task_suite_name: "libero_10" # Options: libero_spatial, libero_object, libero_goal, libero_10
   num_steps_wait: 10
   num_steps_execute: 8 # Number of actions to execute from the predicted chunk
+  num_parallel_envs: 32 # Number of episodes/tasks to evaluate in parallel
   num_trials_per_task: 1
   seed: 42
   image_size: 256

@@ -1,53 +1,50 @@
-# VLANeXt: Recipes for Building Strong VLA Models
+<p align="center">
+  <img src="imgs/LOGO.png" alt="Project Logo" width="80">
+</p>
 
+# VLANeXt: A Simple and Research-Oriented Codebase for Robotics Research
 [![arXiv](https://img.shields.io/badge/arXiv-2602.18532-b31b1b.svg)](https://arxiv.org/abs/2602.18532)
 [![Project Page](https://img.shields.io/badge/Project-Page-green)](https://dravenalg.github.io/VLANeXt)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models-yellow)](https://huggingface.co/DravenALG/VLANeXt)
 [![Awesome VLA & WAM](https://img.shields.io/badge/GitHub-AwesomeVLA&WAM-black)](https://github.com/DravenALG/awesome-vla-wam)
 
-<p align="center">
-<img src="imgs/roadmap.png" alt="roadmap of vlanext" width="60%"/>
-</p>
+
+> 🚀 **Big Update!** Our codebase has received a major upgrade, bringing support for **World Action Models, Latent Action Pretraining and Fine-tuning, JEPA-like World Modeling, Smaller VLAs, Language-Action Learning**, and more. We have also added support for additional data formats and parallel evaluation. Plenty of new features are waiting for you to explore; check [TUTORIAL.md](./TUTORIAL.md)! We also keep the original code in the VLANeXt-ori branch to make it easy to reproduce the recipes explored in our paper.
 
 > 🎉 **Good News!** Our paper has been accepted to **ICML 2026**!
 
-This is a PyTorch implementation of the paper: [VLANeXt: Recipes for Building Strong VLA Models](), and also a **unified**, **easy-to-use** codebase that standardizes training and evaluation while exposing the key components of the VLA design space. It is intentionally lightweight and minimally encapsulated, enabling researchers to reproduce results, probe alternative design choices, and build new VLA variants on a shared, transparent foundation. We also release a [curated and continuously updated list of VLA & WAM research](https://github.com/DravenALG/awesome-vla-wam) (Awesome VLA & WAM) to help better understand the development of VLAs.
-
-**Xiao-Ming Wu**, Bin Fan, Kang Liao, Jian-Jian Jiang, Runze Yang, Yihang Luo, Zhonghua Wu, Wei-Shi Zheng, Chen Change Loy*.
-
-S-Lab, Nanyang Technological University; Sun Yat-sen University; ACE Robotics.
-
 <p align="center">
-<img src="imgs/VLANeXt_codebase.png" alt="codebase overview" width="80%"/>
+  <img src="imgs/codebase.png" alt="Codebase" width="1000">
 </p>
-
-Let's build the future of VLAs together! If you have any questions, feel free to contact me by xiaoming.wu@ntu.edu.sg.
 
 ## 🛠️ Environment Setup
 
 ### Basic Installation
 ```bash
-# Basic setup 
-conda create -n VLANeXt python=3.10
-conda activate VLANeXt
+# Basic setup
+conda create -n codebase python=3.10
+# conda create -n codebase-plus python=3.10, for the LIBERO-plus benchmark
+conda activate codebase
+# conda activate codebase-plus
 pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 pip install flash-attn --no-build-isolation
 conda install -c conda-forge ffmpeg
 ```
 
+
 ### Benchmark Installation
 
 **LIBERO**
 ```bash
-cd third_party
+cd /data/NTU_slab/draven/proj/third_party
 git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git
 cd LIBERO && pip install .
 ```
 
-**LIBERO-plus** (Separate env needed)
+**LIBERO-plus** (Separate environment needed)
 ```bash
-cd third_party
+cd /data/NTU_slab/draven/proj/third_party
 git clone https://github.com/sylvestf/LIBERO-plus.git
 cd LIBERO-plus && pip install .
 # Dependencies
@@ -55,83 +52,124 @@ apt install libexpat1 libfontconfig1-dev libpython3-stdlib libmagickwand-dev
 pip install -r extra_requirements.txt
 conda env config vars set LIBERO_CONFIG_PATH=~/.libero_plus
 ```
-We also need to download the asserts, see [LIBERO-plus](https://github.com/sylvestf/LIBERO-plus).
+You also need to download the assets; see [LIBERO-plus](https://github.com/sylvestf/LIBERO-plus).
 
 
 ## 🚀 Training
-Droid dataset is for robotics pretraining (used in our real-world experiments), and libero dataset is for benchmark evaluation (used in our benchmark evaluation).
-<p align="center">
-<img src="imgs/framework.png" alt="framework of vlanext" width="80%"/>
-</p>
+ONE [Config](config/libero_train_config.yaml), ONE [Training Code](scripts/train.py), and ONE [Model Code](src/models/VLANeXt.py) for ALL. See [TUTORIAL.md](./TUTORIAL.md) for a simple tutorial on how to configure each setting. Below is a brief introduction to the commands used.
 
-### 🧪 Design Space Exploration
-We provide a tutorial-style guide to configuring the **12 design spaces** from our paper.
+### FAST Token Construction
+For classification with FAST tokenization, you need to construct the FAST tokenizer first.
 
-👉 **Please refer to [DESIGN_SPACE.md](DESIGN_SPACE.md) for detailed configuration instructions.**
-
-### Droid Dataset
-For more details, please refer to the [Droid Dataset](https://droid-dataset.github.io).
-
-**Download**:
+**Run Construction**:
 ```bash
-gsutil -m rsync -r gs://gresearch/robotics/droid/1.0.1 droid/1.0.1/ 
+python scripts/train_FAST.py --config config/libero_train_fast_config.yaml
 ```
 
-**Run Training**:
-```bash
-# Single GPU
-CUDA_VISIBLE_DEVICES=0 python -m scripts.train --config config/droid_train_config.yaml
+### Latent Action Training
+The standard latent action training pipeline is: 1) train the latent action models (LAM); 2) generate latent actions using our learned LAM; 3) pretrain the policy model using the generated latent actions; and 4) fine-tune the policy model with real actions. We can simply use the complete LIBERO dataset for latent action pretraining, and fine-tune the models in one suite with real action labels.
 
-# Multi-GPU (Set distributed=true in config)
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29505 -m scripts.train --config config/droid_train_config.yaml
+**Latent Action Models Learning**:
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --standalone --nproc_per_node=8 scripts/train_lam.py --config config/libero_train_lam_config.yaml
 ```
 
-### LIBERO Dataset
-For more details, please refer to the [OpenVLA](https://github.com/openvla/openvla), which modifies the original dataset in LIBERO for training VLAs.
+**Generate Latent Actions**:
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/generate_lam.py --checkpoint /data/NTU_slab/draven/checkpoints/codebase_lam/codebase_lam_libero_mixed_vae/checkpoint_final.pt --source-root /data/NTU_slab/draven/data/LIBERO_fastwam --output-root /data/NTU_slab/draven/data/LIBERO_fastwam_lam --overwrite
+```
+
+**Latent Action Pretraining and Fine-tuning**:
+
+For latent action pretraining, you just need to modify the training config file with the latent actions dataset.
+```bash
+data:
+    data_root: "/data/NTU_slab/draven/data/LIBERO_fastwam_lam"
+    action_mode: "latent"
+model:
+    action_dim: <same as LAM latent_dim>
+```
+For fine-tuning, you just need to switch the config file back.
+```bash
+data:
+    data_root: "/data/NTU_slab/draven/data/LIBERO_fastwam"
+    action_mode: "libero"
+model:
+    action_dim: 7
+```
+
+### LIBERO Training
+
+For the dataset in TFDS format, refer to [OpenVLA](https://github.com/openvla/openvla).
 
 **Download**:
 ```bash
 hf download openvla/modified_libero_rlds --repo-type dataset --local-dir LIBERO_modified
 ```
 
+For the dataset in lerobot format, refer to the [FastWAM](https://github.com/yuantianyuan01/FastWAM.git).
+
+**Download**:
+```bash
+hf download yuanty/LIBERO-fastwam --repo-type dataset --local-dir LIBERO_fastwam
+
+# Build frames to speed up training
+python src/datasets/build_libero_lerobot_frame_cache.py /data/NTU_slab/draven/data/LIBERO_fastwam
+```
+
 **Run Training**:
+
+After downloading the dataset, we can simply train the model using:
 ```bash
 # Single GPU
 CUDA_VISIBLE_DEVICES=0 python -m scripts.train --config config/libero_train_config.yaml
 
-# Multi-GPU (Set distributed=true in config)
-CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun --nproc_per_node=4 --master_port=29506 -m scripts.train --config config/libero_train_config.yaml
+# Multi-GPU (Set distributed=true in config) (Enable DeepSpeed if using)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --standalone --nproc_per_node=8 -m scripts.train --config config/libero_train_config.yaml
 ```
 
-## 📊 Evaluation
-We have released VLANeXt checkpoints for the four LIBERO or LIBERO-plus suites on [huggingface](https://huggingface.co/DravenALG/VLANeXt).
+### DROID Training
+The official DROID dataset is available from [DROID](https://droid-dataset.github.io). Here, we use a reorganized and filtered DROID dataset proposed by [MolmoAct2](https://github.com/allenai/molmoact2).
 
-### LIBERO
+**Download**:
+```bash
+hf download allenai/MolmoAct2-DROID-Dataset --repo-type dataset --local-dir MolmoAct2-DROID
+```
+
+**Run Training**:
+
+After downloading the dataset, we can simply train the model using:
+```bash
+# Single GPU
+CUDA_VISIBLE_DEVICES=0 python -m scripts.train --config config/droid_train_config.yaml
+
+# Multi-GPU (Set distributed=true in config) (Enable DeepSpeed if using)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --standalone --nproc_per_node=8 -m scripts.train --config config/droid_train_config.yaml
+```
+
+
+## 📊 Evaluation
+
+### LIBERO Benchmark
 For more details, please refer to the [official repository of LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO).
 
 ```bash
+# setup environment variable
 unset PYTHONPATH
 export PYTHONPATH=$PYTHONPATH:/data/NTU_slab/draven/proj/third_party/LIBERO
 
-CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_bench_eval
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_bench_eval --config config/libero_bench_config.yaml
 ```
 
-### LIBERO-plus
+### LIBERO-plus Benchmark
 For more details, please refer to the [official repository of LIBERO-plus](https://github.com/sylvestf/LIBERO-plus).
 
 ```bash
+# setup environment variable
 unset PYTHONPATH
 export PYTHONPATH=$PYTHONPATH:/data/NTU_slab/draven/proj/third_party/LIBERO-plus
 
-CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_plus_bench_eval
-```
-
-## ⚡ Analysis
-**Model Size and Speed**  
-Set `CHECKPOINT_PATH` and `INPUT_MODALITY` in `scripts/size_speed_eval.py`.
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python -m scripts.size_speed_eval
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python -m scripts.libero_plus_bench_eval --config config/libero_plus_bench_config.yaml
 ```
 
 ## ❗ Common Issues
@@ -142,10 +180,10 @@ If you run into issues, check [COMMON_ISSUES.md](COMMON_ISSUES.md) for known pro
 If you find VLANeXt useful for your research or applications, please cite our paper using the following BibTeX:
 
 ```bibtex
-  @article{wu2026vlanext,
+  @inproceedings{wu2026vlanext,
       title={VLANeXt: Recipes for Building Strong VLA Models}, 
       author={Xiao-Ming Wu and Bin Fan and Kang Liao and Jian-Jian Jiang and Runze Yang and Yihang Luo and Zhonghua Wu and Wei-Shi Zheng and Chen Change Loy},
-      journal={arXiv preprint arXiv:2602.18532},
+      booktitle={ICML},
       year={2026},
   }
 ```

@@ -8,11 +8,16 @@ model:
   diffusion_steps: 5
   scheduler_type: "flow_match" # Options: "ddpm", "ddim", "flow_match"
 
+project:
+  use_wandb: false
+
 eval:
-  finetuned_checkpoint: "" # Path to the finetuned model checkpoint
+  # finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/dWAM/dWAM_v2_libero/spatial_zero2/ds_checkpoint_final" # Path to the finetuned model checkpoint for DeepSpeed
+  finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/codebase/codebase_v2_libero/mixed_steps30k_dino_image_generation_lerobot_distributed/checkpoint_final.pt" # Path to the finetuned model checkpoint for normal Setup
   task_suite_name: "libero_spatial" # Options: libero_spatial, libero_object, libero_goal, libero_10
   num_steps_wait: 10
   num_steps_execute: 8 # Number of actions to execute from the predicted chunk
+  num_parallel_envs: 32 # Number of episodes/tasks to evaluate in parallel
   num_trials_per_task: 50
   seed: 42
   image_size: 256

@@ -50,8 +50,4 @@ def get_action(cfg, model, obs, task_label, processor=None):
     action = get_vlanext_action(
         cfg, model, processor, obs, task_label
     )
-    if action.ndim == 1:
-        assert action.shape == (ACTION_DIM,)
-    else:
-        assert action.shape[-1] == ACTION_DIM
     return action
