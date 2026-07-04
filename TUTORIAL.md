@@ -772,7 +772,7 @@ The current config disables language-action loss, but keeps LAP formatting setti
 ```yaml
 model:
   language_action_loss_weight: 0.0
-  policy_gradient_stop_for_vlm: true
+  policy_gradient_stop_for_vlm: false
   language_action_format: "lap"
   language_action_num_bins: 1000
   language_action_max_new_tokens: 256
