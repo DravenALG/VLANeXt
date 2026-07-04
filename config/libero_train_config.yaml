@@ -162,7 +162,7 @@ model:
 
   # auxiliary language-action generation loss weight (>0 activates)
   language_action_loss_weight: 0.0
-  policy_gradient_stop_for_vlm: true # if true, stop action-policy gradients from flowing into the VLM
+  policy_gradient_stop_for_vlm: false # if true, stop action-policy gradients from flowing into the VLM
   language_action_format: "lap" # Options: "vla-0", "lap" ("language-action" alias)
   language_action_num_bins: 1000 # only used by vla-0
   language_action_max_new_tokens: 256 # inference-time language-action generation cap
