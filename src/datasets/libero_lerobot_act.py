@@ -537,7 +537,10 @@ class _LiberoLeRobotBase(IterableDataset):
                 wrist_frames = self._read_episode_frames(episode, WRIST_VIDEO_KEY, image_indices)
 
             pad_action_hist = self.history_action_pad if self.emit_history_actions else None
-            pad_action_fut = actions_np[-1].astype(np.float32)
+            if self.action_mode == "libero":
+                pad_action_fut = np.concatenate([self.normalized_zero_pose, actions_np[-1:, 6]]).astype(np.float32)
+            else:
+                pad_action_fut = actions_np[-1].astype(np.float32)
 
             for output_index, t in positions:
                 t = min(int(t), traj_len - 1)

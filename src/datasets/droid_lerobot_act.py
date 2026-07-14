@@ -258,13 +258,6 @@ class DroidLeRobotAct(IterableDataset):
         self.action_denominator = self.action_max - self.action_min
         self.action_denominator = np.where(self.action_denominator == 0, 1.0, self.action_denominator)
 
-        zero_pose = np.zeros(6, dtype=np.float32)
-        self.normalized_zero_pose = 2.0 * (zero_pose - self.action_min) / self.action_denominator - 1.0
-        self.normalized_zero_pose = np.clip(self.normalized_zero_pose, -1.0, 1.0)
-        self.history_action_pad = np.concatenate(
-            [self.normalized_zero_pose, np.array([-1.0], dtype=np.float32)]
-        )
-
         self._episodes = []
         self._data_files = {}
         self._num_records_per_epoch = 0
@@ -639,6 +632,7 @@ class DroidLeRobotAct(IterableDataset):
             if self.view_mode == "multi":
                 wrist_frames = self._read_episode_frames(episode, WRIST_VIDEO_KEY, wrist_image_indices)
 
+            pad_action_hist = actions_np[0].astype(np.float32) if self.emit_history_actions else None
             pad_action_fut = actions_np[-1].astype(np.float32)
             for output_index, t, main_video_key in positions:
                 t = min(int(t), traj_len - 1)
@@ -698,7 +692,7 @@ class DroidLeRobotAct(IterableDataset):
 
                 if self.emit_history_actions:
                     hist_indices_act = np.arange(t - self.history_len, t)
-                    hist_actions = np.tile(self.history_action_pad, (self.history_len, 1)).astype(np.float32)
+                    hist_actions = np.tile(pad_action_hist, (self.history_len, 1)).astype(np.float32)
                     valid_mask = hist_indices_act >= 0
                     if np.any(valid_mask):
                         valid_indices = np.clip(hist_indices_act[valid_mask], 0, traj_len - 1)
