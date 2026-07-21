@@ -19,7 +19,7 @@ data:
   fps: 15.0
   # unused for Droid; kept for config compatibility
   normalization_suite_name: "droid"
-  full_sequence: false  # If true, sample every timestep; if false, subsample
+  full_sequence: true  # If true, sample every timestep; if false, subsample
   sampling_rate: 0.1
 
   # number of past timesteps
@@ -81,7 +81,7 @@ data:
 model:
   # Options: 
   # Qwen/Qwen3.5-0.8B, Qwen/Qwen3.5-2B, Qwen/Qwen3.5-4B, Qwen/Qwen3.5-9B,
-  # Qwen/Qwen3-VL-2B-Instruct, Qwen/Qwen3-VL-4B-Instruct, 
+  # Qwen/Qwen3-VL-2B-Instruct, Qwen/Qwen3-VL-4B-Instruct, Qwen/Qwen3-VL-8B-Instruct
   # google/paligemma-3b-pt-224, 
   # meta-llama/Llama-3.2-3B,
   # Wan-AI/Wan2.2-TI2V-5B,
@@ -127,7 +127,10 @@ model:
 
   # policy configs
   policy_hidden_size: 1024  # 1024 in default
-  policy_depth: 24  # 24 for Qwen3.5 0.8 and Qwen3.5 2B, 32 for Qwen3.5 4B; 30 for Wan2.2-TI2V-5B
+  # 24 for Qwen3.5 0.8 and Qwen3.5 2B, 32 for Qwen3.5 4B and Qwen3.5 9B;
+  # 29 for Qwen3-VL-2B; 36 for Qwen3-VL-4B and Qwen3-VL-8B;
+  # 30 for Wan2.2-TI2V-5B;
+  policy_depth: 24
   policy_num_heads: 16
   policy_mlp_ratio: 4.0
 
