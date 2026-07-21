@@ -150,7 +150,7 @@ model:
 
   # WAN video-generation backbone configs. Active only when lmm_path contains "wan".
   # WAN requires loss_type="diffusion", scheduler_type="flow_match", condition_type="tight".
-  video_generation_loss_weight: 1.0
+  video_generation_loss_weight: 0.0 # set to 1.0 to activate
   wan_action_condition_mode: "fast" # Options: "fast", "joint"
   wan_flow_shift: 5.0
   wan_text_len: 512
@@ -165,7 +165,7 @@ model:
   dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
 
   # auxiliary language-action generation loss weight (>0 activates)
-  language_action_loss_weight: 0.0
+  language_action_loss_weight: 0.0 # set to 1.0 to activate
   policy_gradient_stop_for_vlm: false # if true, stop action-policy gradients from flowing into the VLM
   language_action_format: "vla-0" # Options: "vla-0", "lap" ("language-action" alias)
   language_action_num_bins: 1000 # only used by vla-0
@@ -219,7 +219,7 @@ train:
     train_vision_encoder: false  # if true, also unfreezes the vision encoder during alignment
 
   deepspeed:
-    enabled: true  # set to true to use DeepSpeed instead of DDP
+    enabled: false  # set to true to use DeepSpeed instead of DDP
     zero_stage: 1   # ZeRO optimization stage: 0, 1, 2, or 3
     offload_optimizer_device: "none"  # "none", "cpu", or "nvme"
     offload_param_device: "none"      # "none", "cpu", or "nvme" (ZeRO-3 only)
