@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "codebase_v2_droid_steps100k_lerobot_distributed"
+  name: "codebase_v2_droid_steps100k_bs128_lerobot_distributed"
   output_dir: "/data/NTU_slab/draven/checkpoints/codebase"
   log_interval: 10
   save_interval: 20000
@@ -39,7 +39,7 @@ data:
   data_file_cache_size: 2
 
   # batch training configs
-  batch_size: 256  # this is the total batch size across all GPUs, it will be automatically divided by the number of GPUs used
+  batch_size: 128  # this is the total batch size across all GPUs, it will be automatically divided by the number of GPUs used
   max_steps: 100000
   num_workers: 1
   pin_memory: true
