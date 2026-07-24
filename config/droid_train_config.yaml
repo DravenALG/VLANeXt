@@ -45,7 +45,7 @@ data:
   pin_memory: true
   persistent_workers: true
   prefetch_factor: 4
-  drop_last: true
+  drop_last: false
 
   # vision input controls
   input_modality: "image"   # temporal history, options: "video", "image"
