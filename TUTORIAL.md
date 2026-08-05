@@ -70,11 +70,11 @@ We use ⭐️ for the important design choices, others are some engineering para
 
 #### Example from current config
 
-The current config uses a small Qwen backbone, loads pretrained weights, and fine-tunes it.
+The current config uses a Qwen3-VL 2B backbone, loads pretrained weights, and fine-tunes it.
 
 ```yaml
 model:
-  lmm_path: "Qwen/Qwen3.5-0.8B"
+  lmm_path: "Qwen/Qwen3-VL-2B-Instruct"
   vision_encoder_path: "google/siglip2-base-patch16-256"
   use_pretrained_backbone: true
   backbone_mode: "finetune"
@@ -122,6 +122,7 @@ model:
 - `model.policy_depth`: number of policy Transformer blocks.
 - `model.policy_num_heads`: number of attention heads in the policy.
 - `model.policy_mlp_ratio`: MLP expansion ratio inside policy blocks.
+- `model.policy_pos_embed`: policy position embedding. `absolute` is the general default; `rope` is supported only by Qwen with `tight` or `soft` conditioning.
 
 The actual policy class is selected by `model.loss_type` and `model.condition_type`:
 
@@ -134,7 +135,7 @@ The actual policy class is selected by `model.loss_type` and `model.condition_ty
 
 #### Example from current config
 
-The current config predicts an 8-step chunk of 7D actions with a 24-layer policy.
+The current config predicts an 8-step chunk of 7D actions with a 29-layer policy.
 
 ```yaml
 data:
@@ -143,9 +144,10 @@ data:
 model:
   action_dim: 7
   policy_hidden_size: 1024
-  policy_depth: 24
+  policy_depth: 29
   policy_num_heads: 16
   policy_mlp_ratio: 4.0
+  policy_pos_embed: "absolute"
 ```
 
 ### 1.4 Proprioception and Action Inputs
@@ -192,6 +194,7 @@ model:
 - `data.task_suite_name`: task suite or dataset split name.
   - LIBERO options include `libero_spatial`, `libero_object`, `libero_goal`, `libero_10`, `libero_mixed`.
 - `data.normalization_suite_name`: action statistics used for normalization. If empty, it follows `task_suite_name`.
+- `data.normalization_stats_version`: action-statistics version, `original` or `legacy`.
 - `model.action_dim`: must match the action target dimension emitted by the dataset.
 
 
@@ -207,6 +210,7 @@ data:
   action_mode: "libero"
   task_suite_name: "libero_mixed"
   normalization_suite_name: "libero_mixed"
+  normalization_stats_version: "legacy"
 model:
   action_dim: 7
 ```
@@ -217,6 +221,7 @@ model:
 
 - `data.full_sequence`: if `true`, sample every valid timestep; if `false`, randomly subsample each trajectory.
 - `data.sampling_rate`: fraction of valid timesteps sampled when `full_sequence=false`.
+- `data.balance_suites`: for mixed LIBERO LeRobot training, balance samples across component suites when `true`. It has no effect on other suites or formats.
 - `data.history_len`: number of historical timesteps for video, proprioception, and previous actions.
 - `data.future_len`: number of future actions in each target chunk.
 - `data.future_video_downsample`: for WAN future-video targets, sample future frames every N action steps.
@@ -225,12 +230,13 @@ model:
 
 #### Example from current config
 
-The current config samples 10% of timesteps and predicts 8-step action chunks.
+The current config samples every valid timestep and predicts 8-step action chunks. Therefore, `sampling_rate` is currently inactive.
 
 ```yaml
 data:
-  full_sequence: false
+  full_sequence: true
   sampling_rate: 0.1
+  balance_suites: false
   history_len: 8
   future_len: 8
   future_video_downsample: 1
@@ -329,18 +335,18 @@ LeRobot LIBERO and Droid datasets emit prebatched samples internally, so the out
 
 #### Example from current config
 
-The current config uses total batch size 256 and trains for 30k optimizer steps.
+The current config uses total batch size 128 and trains for 20k optimizer steps.
 
 ```yaml
 data:
   buffer_size: 1000
-  batch_size: 256
-  max_steps: 30000
+  batch_size: 128
+  max_steps: 20000
   num_workers: 1
   pin_memory: true
   persistent_workers: true
   prefetch_factor: 4
-  drop_last: true
+  drop_last: false
 ```
 
 ## 3. Training
@@ -361,7 +367,7 @@ data:
 
 ```yaml
 project:
-  name: "codebase_v2_libero_mixed_steps30k_lerobot_distributed"
+  name: "codebase_v3_libero_mixed_steps20k_bs128_lerobot_distributed"
   output_dir: "/data/NTU_slab/draven/checkpoints/codebase"
   log_interval: 10
   save_interval: 20000
@@ -397,7 +403,7 @@ train:
   learning_rate: 1.0e-4
   scheduler: "cosine_decay"
   weight_decay: 0.1
-  warmup_steps: 1500
+  warmup_steps: 1000
   gradient_accumulation_steps: 1
   max_grad_norm: 1.0
   device: "cuda"
@@ -423,7 +429,7 @@ train:
 ```yaml
 train:
   deepspeed:
-    enabled: true
+    enabled: false
     zero_stage: 1
     offload_optimizer_device: "none"
     offload_param_device: "none"
@@ -439,7 +445,8 @@ train:
 
 - `train.ema.enabled`: enable exponential moving average checkpoints. EMA checkpoints can be more stable for benchmark evaluation.
 - `train.ema.ema_weight`: old EMA weight. Current model contributes `1 - ema_weight`.
-- `train.ema.save_interval`: EMA update/save interval in optimizer steps.
+- `train.ema.update_interval`: interval between in-memory EMA updates, in optimizer steps.
+- `train.ema.save_interval`: interval between EMA checkpoint saves, in optimizer steps.
 
 EMA single-file saving is not supported with DeepSpeed ZeRO-3 in this trainer.
 
@@ -452,7 +459,8 @@ train:
   ema:
     enabled: false
     ema_weight: 0.999
-    save_interval: 5
+    update_interval: 5
+    save_interval: 20000
 ```
 
 ### 3.5 Alignment Stage
@@ -678,8 +686,8 @@ data:
   future_len: 8
   future_video_downsample: 1
 model:
-  lmm_path: "Qwen/Qwen3.5-0.8B"
-  video_generation_loss_weight: 1.0
+  lmm_path: "Qwen/Qwen3-VL-2B-Instruct"
+  video_generation_loss_weight: 0.0
   wan_action_condition_mode: "fast"
   wan_flow_shift: 5.0
   wan_text_len: 512
