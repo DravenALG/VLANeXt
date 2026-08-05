@@ -14,21 +14,83 @@ from src.datasets.language_action import (
     normalize_language_action_format,
 )
 
-action_min_spatial = [-0.9375, -0.9375, -0.9375, -0.18857142329216003, -0.3675000071525574, -0.36000001430511475]
-action_max_spatial = [0.9375, 0.9375, 0.9375, 0.1971428543329239, 0.33642858266830444, 0.375]
+LIBERO_ACTION_STATS = {
+    # Keeps the current behavior used by existing training runs.
+    "original": {
+        "spatial": (
+            [-0.9375, -0.9375, -0.9375, -0.1875, -0.3675000071525574, -0.36000001430511475],
+            [0.9375, 0.9375, 0.9375, 0.1971428543329239, 0.33642858266830444, 0.375],
+        ),
+        "object": (
+            [-0.8839285969734192, -0.9375, -0.9375, -0.15000000596046448, -0.29035714268684387, -0.32892856001853943],
+            [0.9375, 0.8919642567634583, 0.9375, 0.17678570747375488, 0.35035714507102966, 0.1810714304447174],
+        ),
+        "goal": (
+            [-0.9375, -0.9375, -0.9375, -0.2582142949104309, -0.375, -0.2871428430080414],
+            [0.9375, 0.9375, 0.9375, 0.3557142913341522, 0.375, 0.375],
+        ),
+        "10": (
+            [-0.9375, -0.9375, -0.9375, -0.23642857372760773, -0.3053571283817291, -0.3675000071525574],
+            [0.9375, 0.9375, 0.9375, 0.30000001192092896, 0.29357144236564636, 0.375],
+        ),
+        "mixed": (
+            [-0.9375, -0.9375, -0.9375, -0.2582142949104309, -0.375, -0.3675000071525574],
+            [0.9375, 0.9375, 0.9375, 0.3557142913341522, 0.375, 0.375],
+        ),
+    },
+    "legacy": {
+        "spatial": (
+            [-0.9375, -0.9375, -0.9375, -0.18857142329216003, -0.3675000071525574, -0.36000001430511475],
+            [0.9375, 0.9375, 0.9375, 0.1971428543329239, 0.33642858266830444, 0.375],
+        ),
+        "object": (
+            [-0.8839285969734192, -0.9375, -0.9375, -0.15000000596046448, -0.29035714268684387, -0.32892856001853943],
+            [0.9375, 0.8919642567634583, 0.9375, 0.17678570747375488, 0.35035714507102966, 0.1810714304447174],
+        ),
+        "goal": (
+            [-0.9375, -0.9375, -0.9375, -0.24214285612106323, -0.375, -0.2871428430080414],
+            [0.9375, 0.9375, 0.9375, 0.3557142913341522, 0.375, 0.375],
+        ),
+        "10": (
+            [-0.9375, -0.9375, -0.9375, -0.23642857372760773, -0.3053571283817291, -0.3642857074737549],
+            [0.9375, 0.9375, 0.9375, 0.32892856001853943, 0.36964285373687744, 0.375],
+        ),
+        "mixed": (
+            [-0.9375, -0.9375, -0.9375, -0.24214285612106323, -0.375, -0.3642857074737549],
+            [0.9375, 0.9375, 0.9375, 0.3557142913341522, 0.375, 0.375],
+        ),
+    },
+}
+LIBERO_STATS_DEFAULT_VERSION = "original"
 
-action_min_object = [-0.8839285969734192, -0.9375, -0.9375, -0.15000000596046448, -0.29035714268684387, -0.32892856001853943]
-action_max_object = [0.9375, 0.8919642567634583, 0.9375, 0.17678570747375488, 0.35035714507102966, 0.1810714304447174]
 
-action_min_goal =  [-0.9375, -0.9375, -0.9375, -0.24214285612106323, -0.375, -0.2871428430080414]
-action_max_goal = [0.9375, 0.9375, 0.9375, 0.3557142913341522, 0.375, 0.375]
+def normalize_libero_action_stats_version(stats_version):
+    if stats_version is None or stats_version == "":
+        return LIBERO_STATS_DEFAULT_VERSION
 
-action_min_10 = [-0.9375, -0.9375, -0.9375, -0.23642857372760773, -0.3053571283817291, -0.3642857074737549]
-action_max_10 =  [0.9375, 0.9375, 0.9375, 0.32892856001853943, 0.36964285373687744, 0.375]
+    normalized = str(stats_version).strip().lower()
+    if normalized not in LIBERO_ACTION_STATS:
+        raise ValueError(
+            f"Unknown LIBERO stats version '{stats_version}'. "
+            f"Options: {', '.join(sorted(LIBERO_ACTION_STATS))}"
+        )
+    return normalized
 
-action_min_mixed = [-0.9375, -0.9375, -0.9375, -0.24214285612106323, -0.375, -0.3642857074737549]
-action_max_mixed = [0.9375, 0.9375, 0.9375, 0.3557142913341522, 0.375, 0.375]
 
+def _resolve_libero_stats_suite_name(suite_name):
+    stats_suite_name = str(suite_name or "")
+
+    if "mixed" in stats_suite_name:
+        return "mixed"
+    if "spatial" in stats_suite_name:
+        return "spatial"
+    if "object" in stats_suite_name:
+        return "object"
+    if "goal" in stats_suite_name:
+        return "goal"
+    if "10" in stats_suite_name:
+        return "10"
+    raise ValueError(f"Unknown LIBERO stats suite '{stats_suite_name}'")
 
 
 def get_libero_normalization_suite_name(task_suite_name, configured_suite_name=None):
@@ -37,23 +99,11 @@ def get_libero_normalization_suite_name(task_suite_name, configured_suite_name=N
     return task_suite_name
 
 
-def get_libero_action_stats(suite_name):
+def get_libero_action_stats(suite_name, stats_version=None):
     """Return action min/max stats for a LIBERO normalization suite."""
-    stats_suite_name = suite_name
-
-    if 'mixed' in stats_suite_name:
-        action_min, action_max = action_min_mixed, action_max_mixed
-    elif 'spatial' in stats_suite_name:
-        action_min, action_max = action_min_spatial, action_max_spatial
-    elif 'object' in stats_suite_name:
-        action_min, action_max = action_min_object, action_max_object
-    elif 'goal' in stats_suite_name:
-        action_min, action_max = action_min_goal, action_max_goal
-    elif '10' in stats_suite_name:
-        action_min, action_max = action_min_10, action_max_10
-    else:
-        raise ValueError(f"Unknown LIBERO stats suite '{stats_suite_name}'")
-
+    normalized_version = normalize_libero_action_stats_version(stats_version)
+    stats_suite_name = _resolve_libero_stats_suite_name(suite_name)
+    action_min, action_max = LIBERO_ACTION_STATS[normalized_version][stats_suite_name]
     return np.array(action_min, dtype=np.float32), np.array(action_max, dtype=np.float32)
 
 
@@ -124,6 +174,7 @@ class LiberoAct(IterableDataset):
         load_language_action=False,
         language_action_format="lap",
         language_action_num_bins=1000,
+        normalization_stats_version=None,
     ):
         super().__init__()
         self.data_path = data_path
@@ -153,7 +204,11 @@ class LiberoAct(IterableDataset):
         self.language_action_num_bins = int(language_action_num_bins)
 
         self.normalization_suite_name = normalization_suite_name
-        self.action_min, self.action_max = get_libero_action_stats(self.normalization_suite_name)
+        self.normalization_stats_version = normalize_libero_action_stats_version(normalization_stats_version)
+        self.action_min, self.action_max = get_libero_action_stats(
+            self.normalization_suite_name,
+            self.normalization_stats_version,
+        )
 
         self.action_denominator = self.action_max - self.action_min
         self.action_denominator = np.where(self.action_denominator == 0, 1.0, self.action_denominator)
@@ -387,9 +442,9 @@ class LiberoMixedAct(IterableDataset):
     """Mix of all four LIBERO suites (spatial, object, goal, 10) for joint training.
 
     All sub-datasets are constructed with ``dataset_name="libero_mixed"`` so every
-    suite is normalized with the shared ``action_min_mixed`` / ``action_max_mixed``
-    stats (union across suites). This keeps a single consistent [-1, 1] target
-    space across the mixed batch.
+    suite is normalized with the shared LIBERO mixed stats for the selected
+    version. This keeps a single consistent [-1, 1] target space across the mixed
+    batch.
     At iteration time, samples are drawn uniformly at random from whichever
     sub-iterators are still active; when a sub-iterator is exhausted it is dropped
     and the remaining iterators continue.
@@ -420,6 +475,7 @@ class LiberoMixedAct(IterableDataset):
         load_language_action=False,
         language_action_format="lap",
         language_action_num_bins=1000,
+        normalization_stats_version=None,
     ):
         super().__init__()
         suite_buffer_size = max(1, buffer_size // len(self.SUITES))
@@ -428,6 +484,7 @@ class LiberoMixedAct(IterableDataset):
                 data_path=os.path.join(data_root, suite, version),
                 dataset_name="libero_mixed",
                 normalization_suite_name="libero_mixed",
+                normalization_stats_version=normalization_stats_version,
                 length=length,
                 history_len=history_len,
                 future_len=future_len,

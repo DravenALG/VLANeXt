@@ -10,6 +10,9 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 
+if os.environ.get("LIBERO_CONFIG_PATH") == "":
+    os.environ.pop("LIBERO_CONFIG_PATH")
+
 
 def _configure_multiprocessing() -> None:
     start_method = os.environ.get("LIBERO_EVAL_MP_START_METHOD", "spawn")
@@ -23,7 +26,11 @@ import wandb
 import yaml
 from libero.libero import benchmark
 
-from src.datasets.libero_act import get_libero_action_stats, get_libero_normalization_suite_name
+from src.datasets.libero_act import (
+    get_libero_action_stats,
+    get_libero_normalization_suite_name,
+    normalize_libero_action_stats_version,
+)
 from src.evaluation.libero_bench.parallel_eval_utils import (
     build_episode_specs,
     chunked,
@@ -124,8 +131,18 @@ def eval_libero(config) -> None:
         train_suite_name,
         configured_suite_name=train_data_cfg.get("normalization_suite_name"),
     )
-    action_min, action_max = get_libero_action_stats(normalization_suite_name)
-    logger.info("Action normalization stats: %s", normalization_suite_name)
+    normalization_stats_version = normalize_libero_action_stats_version(
+        train_data_cfg.get("normalization_stats_version")
+    )
+    action_min, action_max = get_libero_action_stats(
+        normalization_suite_name,
+        normalization_stats_version,
+    )
+    logger.info(
+        "Action normalization stats: %s/%s",
+        normalization_suite_name,
+        normalization_stats_version,
+    )
 
     resize_size = get_image_resize_size(cfg)
     input_modality = train_data_cfg.get("input_modality", "image")

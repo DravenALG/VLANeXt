@@ -1,5 +1,5 @@
+import argparse
 import json
-import sys
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -10,7 +10,6 @@ from PIL import Image
 MAIN_VIDEO_KEY = "observation.images.image"
 WRIST_VIDEO_KEY = "observation.images.wrist_image"
 VIDEO_KEYS = (MAIN_VIDEO_KEY, WRIST_VIDEO_KEY)
-RESIZE_SIZE = (256, 256)
 FRAME_CACHE_DIR = "frame_cache"
 
 
@@ -29,8 +28,8 @@ def _format_lerobot_path(root, template, episode_chunk, episode_index, video_key
     return root / template.format(**kwargs)
 
 
-def _format_frame_cache_path(root, episode_chunk, episode_index, video_key):
-    h, w = RESIZE_SIZE
+def _format_frame_cache_path(root, episode_chunk, episode_index, video_key, resize_size):
+    h, w = resize_size
     return (
         root
         / FRAME_CACHE_DIR
@@ -50,9 +49,9 @@ def _to_uint8(frame):
     return frame.astype(np.uint8)
 
 
-def _resize_frame(frame):
+def _resize_frame(frame, resize_size):
     frame = _to_uint8(frame)
-    target_h, target_w = RESIZE_SIZE
+    target_h, target_w = resize_size
     if frame.shape[0] == target_h and frame.shape[1] == target_w:
         return frame
     image = Image.fromarray(frame)
@@ -60,8 +59,8 @@ def _resize_frame(frame):
     return np.asarray(image, dtype=np.uint8)
 
 
-def _read_video(video_path):
-    frames = [_resize_frame(frame) for frame in iio.imiter(video_path)]
+def _read_video(video_path, resize_size):
+    frames = [_resize_frame(frame, resize_size) for frame in iio.imiter(video_path)]
     if not frames:
         raise RuntimeError(f"No frames decoded from {video_path}")
     return np.stack(frames, axis=0)
@@ -85,7 +84,15 @@ def _find_suite_roots(root):
     ]
 
 
-def build_suite_cache(suite_root):
+def _parse_resize_size(value):
+    if "x" in value.lower():
+        h, w = value.lower().split("x", 1)
+        return int(h), int(w)
+    size = int(value)
+    return size, size
+
+
+def build_suite_cache(suite_root, resize_size):
     info_path = suite_root / "meta" / "info.json"
     episodes_path = suite_root / "meta" / "episodes.jsonl"
 
@@ -122,6 +129,7 @@ def build_suite_cache(suite_root):
                 episode_chunk=episode_chunk,
                 episode_index=episode_index,
                 video_key=video_key,
+                resize_size=resize_size,
             )
 
             if cache_path.is_file():
@@ -132,7 +140,7 @@ def build_suite_cache(suite_root):
                 print(f"[skip] missing video: {video_path}")
                 continue
 
-            frames = _read_video(video_path)
+            frames = _read_video(video_path, resize_size)
             if expected_len and frames.shape[0] != expected_len:
                 print(
                     f"[warn] frame count mismatch for {video_path}: "
@@ -149,18 +157,26 @@ def build_suite_cache(suite_root):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit(
-            "Usage: python src/datasets/build_lerobot_frame_cache.py /path/to/lerobot_root"
-        )
+    parser = argparse.ArgumentParser(description="Build resized frame caches for LeRobot LIBERO videos.")
+    parser.add_argument(
+        "root",
+        help="Path to the LeRobot LIBERO dataset root.",
+    )
+    parser.add_argument(
+        "--resize-size",
+        default="256",
+        help="Output frame size as INT or HxW. Default: 256.",
+    )
+    args = parser.parse_args()
 
-    root = Path(sys.argv[1]).expanduser().resolve()
+    root = Path(args.root).expanduser().resolve()
+    resize_size = _parse_resize_size(args.resize_size)
     suite_roots = _find_suite_roots(root)
     if not suite_roots:
         raise RuntimeError(f"No LeRobot suite roots found under {root}")
 
     for suite_root in suite_roots:
-        build_suite_cache(suite_root)
+        build_suite_cache(suite_root, resize_size)
 
 
 if __name__ == "__main__":

@@ -21,9 +21,15 @@ from torchvision.transforms import RandomResizedCrop
 from torchvision.transforms import functional as TVF
 
 from src.models.VLANeXt import VLANeXt
-from src.datasets.libero_act import LiberoAct, LiberoMixedAct, get_libero_normalization_suite_name
+from src.datasets.libero_act import (
+    LiberoAct,
+    LiberoMixedAct,
+    get_libero_normalization_suite_name,
+    normalize_libero_action_stats_version,
+)
 from src.datasets.libero_lerobot_act import LiberoLeRobotAct, LiberoMixedLeRobotAct
 from src.datasets.droid_lerobot_act import DroidLeRobotAct
+from src.datasets.mixed_lerobot_act import MixedLeRobotAct
 from src.datasets.real_world_act import RealWorldAct
 from src.datasets.language_action import (
     format_language_action_prompt,
@@ -157,7 +163,25 @@ class DataCollatorForVLANeXt:
 
         out = np.stack(out, axis=0)
         return out if is_video else out[0]
-    
+
+    def _augment_future_video_uint8(self, future_video: np.ndarray) -> np.ndarray:
+        """Augment each camera view separately in a future video."""
+        if self.view_mode != "multi":
+            return self._augment_frames_uint8(future_video)
+        if future_video.ndim != 4:
+            raise ValueError(
+                f"future_video must be [T, H, W, C], got {tuple(future_video.shape)}."
+            )
+
+        width = future_video.shape[2]
+        if width % 2 != 0:
+            raise ValueError(f"Multi-view future_video width must be even, got {width}.")
+
+        midpoint = width // 2
+        main_video = self._augment_frames_uint8(future_video[:, :, :midpoint, :])
+        wrist_video = self._augment_frames_uint8(future_video[:, :, midpoint:, :])
+        return np.concatenate([main_video, wrist_video], axis=2)
+
     def _sample_brightness_factor(self) -> float:
         if not self.rb:
             return 1.0
@@ -430,7 +454,7 @@ class DataCollatorForVLANeXt:
             if self.load_future_video:
                 if "future_video" not in sample:
                     raise KeyError("load_future_video=True but sample has no `future_video` field.")
-                future_video = self._augment_frames_uint8(sample["future_video"])
+                future_video = self._augment_future_video_uint8(sample["future_video"])
                 future_videos_list.append(self._future_video_to_tensor(future_video))
 
         model_texts = language_action_full_texts if self.load_language_action else texts
@@ -840,6 +864,7 @@ class EMACheckpoint:
         self,
         *,
         ema_weight,
+        update_interval,
         save_interval,
         save_dir,
         config,
@@ -849,6 +874,10 @@ class EMACheckpoint:
         self.ema_weight = float(ema_weight)
         if not 0.0 <= self.ema_weight <= 1.0:
             raise ValueError("train.ema.ema_weight must be in [0, 1].")
+
+        self.update_interval = int(update_interval)
+        if self.update_interval <= 0:
+            raise ValueError("train.ema.update_interval must be a positive integer.")
 
         self.save_interval = int(save_interval)
         if self.save_interval <= 0:
@@ -867,15 +896,16 @@ class EMACheckpoint:
         # resume
         if start_step > 0 and os.path.isfile(self.latest_path):
             checkpoint = _torch_load_checkpoint(self.latest_path, map_location="cpu")
-            ema_step = int(checkpoint.get("step", 0))
-            if ema_step <= start_step and "model_state_dict" in checkpoint:
-                self._load_state_dict(checkpoint["model_state_dict"], ema_step)
+            checkpoint_step = int(checkpoint.get("step", 0))
+            ema_update_step = int(checkpoint.get("ema_last_update_step", checkpoint_step))
+            if checkpoint_step <= start_step and "model_state_dict" in checkpoint:
+                self._load_state_dict(checkpoint["model_state_dict"], ema_update_step)
                 return
 
             self.logger.warning(
                 "Skipping EMA checkpoint %s because its step=%d is newer than resume step=%d.",
                 self.latest_path,
-                ema_step,
+                checkpoint_step,
                 start_step,
             )
             
@@ -908,10 +938,13 @@ class EMACheckpoint:
         self.last_update_step = int(step)
         self.logger.info("Initialized EMA weights from current model at step %d", self.last_update_step)
 
-    # save when reach interval
+    # Update and save independently according to their respective intervals.
     def maybe_update_and_save(self, step):
-        if step > 0 and step % self.save_interval == 0:
+        if step <= 0:
+            return
+        if step % self.update_interval == 0:
             self.update(step)
+        if step % self.save_interval == 0:
             self.save(self.latest_path, step)
 
     @torch.no_grad()
@@ -948,7 +981,9 @@ class EMACheckpoint:
             'config': self.config,
             'checkpoint_type': 'ema',
             'ema_weight': self.ema_weight,
+            'ema_update_interval': self.update_interval,
             'ema_save_interval': self.save_interval,
+            'ema_last_update_step': self.last_update_step,
         }, path)
         self.logger.info("Saved EMA checkpoint to %s", path)
 
@@ -1409,6 +1444,8 @@ def train(config):
     augmentation = config["data"].get("augmentation", {})
     dataset_name = config['data'].get('dataset_name', 'libero')
     dataset_format = config['data'].get('dataset_format', 'tfds')
+    libero_mix_config = config['data'].get('libero_mix', {}) or {}
+    mix_libero = bool(libero_mix_config.get('enabled', False))
     supported_dataset_names = {"libero", "real", "droid"}
     if dataset_name not in supported_dataset_names:
         raise ValueError(
@@ -1426,6 +1463,10 @@ def train(config):
             )
     elif dataset_name == "droid" and dataset_format != "lerobot":
         raise ValueError("Droid only supports dataset_format='lerobot'.")
+    if mix_libero and dataset_name != "droid":
+        raise ValueError("data.libero_mix is only supported when dataset_name='droid'.")
+    if mix_libero and int(config['model'].get('action_dim', 7)) != 7:
+        raise ValueError("data.libero_mix requires model.action_dim=7 for LIBERO actions.")
     if load_language_action and dataset_name not in {"libero", "droid"} and language_action_format != "vla-0":
         raise ValueError(
             "language_action_format='lap' is only implemented for LIBERO and Droid. "
@@ -1440,6 +1481,29 @@ def train(config):
             config['data'].get('task_suite_name'),
             configured_suite_name=config['data'].get('normalization_suite_name'),
         )
+        config['data']['normalization_stats_version'] = normalize_libero_action_stats_version(
+            config['data'].get('normalization_stats_version')
+        )
+    if mix_libero:
+        mix_libero_task_suite = libero_mix_config.get('task_suite_name', 'libero_mixed')
+        mix_libero_stats_suite = get_libero_normalization_suite_name(
+            mix_libero_task_suite,
+            configured_suite_name=libero_mix_config.get('normalization_suite_name'),
+        )
+        mix_libero_stats_version = normalize_libero_action_stats_version(
+            libero_mix_config.get('normalization_stats_version')
+        )
+        mix_libero_balance_suites = bool(libero_mix_config.get('balance_suites', False))
+        mix_libero_data_root = libero_mix_config.get('data_root')
+        if not mix_libero_data_root:
+            raise ValueError("data.libero_mix.data_root is required when Libero mixing is enabled.")
+    else:
+        mix_libero_task_suite = None
+        mix_libero_stats_suite = None
+        mix_libero_stats_version = None
+        mix_libero_balance_suites = False
+        mix_libero_data_root = None
+    stats_version = config['data'].get('normalization_stats_version')
     if dataset_name == "libero":
         fps = 20.0
     elif dataset_name == "real":
@@ -1449,6 +1513,7 @@ def train(config):
     else:
         fps = 20.0
     full_sequence = bool(config['data'].get('full_sequence', False))
+    balance_suites = bool(config['data'].get('balance_suites', False))
     action_mode = str(config['data'].get('action_mode', 'libero')).lower()
     seed = config['train'].get('seed', 42)
 
@@ -1536,6 +1601,7 @@ def train(config):
         policy_depth=config['model']['policy_depth'],
         policy_num_heads=config['model']['policy_num_heads'],
         policy_mlp_ratio=config['model']['policy_mlp_ratio'],
+        policy_pos_embed=config['model'].get('policy_pos_embed', 'absolute'),
         use_proprio_input_vlm=use_proprio_input_vlm,
         use_action_input_policy=use_action_input_policy,
         use_transformer_proprio_projector=config['model']['use_transformer_proprio_projector'],
@@ -1648,16 +1714,26 @@ def train(config):
         droid_path = data_root
         if global_rank == 0:
             logger.info("Initializing Droid LeRobot Dataset: path=%s fps=%.2f", droid_path, fps)
+            if mix_libero:
+                logger.info(
+                    "Libero mixing enabled: root=%s task=%s normalization_stats=%s/%s balance_suites=%s",
+                    mix_libero_data_root,
+                    mix_libero_task_suite,
+                    mix_libero_stats_suite,
+                    mix_libero_stats_version,
+                    mix_libero_balance_suites,
+                )
     else:
         task_suite = config['data']['task_suite_name']
         stats_suite = config['data'].get('normalization_suite_name', task_suite)
         if task_suite == "libero_mixed":
             if global_rank == 0:
                 logger.info(
-                    "Initializing Libero Mixed Dataset: format=%s root=%s normalization_stats=%s",
+                    "Initializing Libero Mixed Dataset: format=%s root=%s normalization_stats=%s/%s",
                     dataset_format,
                     data_root,
                     stats_suite,
+                    stats_version,
                 )
         else:
             if dataset_format == "lerobot":
@@ -1666,10 +1742,11 @@ def train(config):
                 libero_path = os.path.join(data_root, task_suite, "1.0.0")
             if global_rank == 0:
                 logger.info(
-                    "Initializing Libero Dataset: format=%s path=%s normalization_stats=%s",
+                    "Initializing Libero Dataset: format=%s path=%s normalization_stats=%s/%s",
                     dataset_format,
                     libero_path,
                     stats_suite,
+                    stats_version,
                 )
     collator = DataCollatorForVLANeXt(
         processor=model_unwrapped.processor,
@@ -1707,9 +1784,10 @@ def train(config):
     if global_rank == 0:
         if (dataset_name == "libero" and dataset_format == "lerobot") or dataset_name == "droid":
             logger.info(
-                "LeRobot dataset emits prebatched random samples: batch_size=%d drop_last=%s",
+                "LeRobot dataset emits prebatched random samples: batch_size=%d drop_last=%s balance_suites=%s",
                 per_device_batch_size,
                 bool(config['data'].get('drop_last', True)),
+                balance_suites if dataset_name == "libero" and dataset_format == "lerobot" else False,
             )
         else:
             logger.info("Dataset shuffle buffer size: %d", buffer_size)
@@ -1734,7 +1812,7 @@ def train(config):
                 seed=seed,
             )
         elif dataset_name == "droid":
-            ds = DroidLeRobotAct(
+            droid_ds = DroidLeRobotAct(
                 data_path=droid_path,
                 dataset_name=task_suite,
                 history_len=history_len,
@@ -1763,12 +1841,72 @@ def train(config):
                 action_mode=action_mode,
                 fps=fps,
             )
+            if mix_libero:
+                libero_common_kwargs = {
+                    'normalization_suite_name': mix_libero_stats_suite,
+                    'normalization_stats_version': mix_libero_stats_version,
+                    'history_len': history_len,
+                    'future_len': config['data']['future_len'],
+                    'full_sequence': full_sequence,
+                    'input_modality': input_modality,
+                    'view_mode': view_mode,
+                    'load_future_image': load_future_image,
+                    'future_image_mode': future_image_mode,
+                    'load_future_video': load_future_video,
+                    'future_video_downsample': future_video_downsample,
+                    'buffer_size': buffer_size,
+                    'sampling_rate': config['data'].get('sampling_rate', 0.1),
+                    'allow_end_padding': allow_end_padding,
+                    'emit_proprioception': use_proprio_input_vlm,
+                    'emit_history_actions': use_action_input_policy,
+                    'batch_size': per_device_batch_size,
+                    'drop_last': bool(config['data'].get('drop_last', True)),
+                    'seed': seed,
+                    'image_resize_size': image_resize_size,
+                    'load_language_action': load_language_action,
+                    'language_action_format': language_action_format,
+                    'language_action_num_bins': language_action_num_bins,
+                    'action_mode': 'libero',
+                    'balance_suites': mix_libero_balance_suites,
+                }
+                if mix_libero_task_suite == "libero_mixed":
+                    libero_ds = LiberoMixedLeRobotAct(
+                        data_root=mix_libero_data_root,
+                        dataset_name=mix_libero_task_suite,
+                        **libero_common_kwargs,
+                    )
+                else:
+                    libero_ds = LiberoLeRobotAct(
+                        data_path=os.path.join(mix_libero_data_root, mix_libero_task_suite),
+                        dataset_name=mix_libero_task_suite,
+                        **libero_common_kwargs,
+                    )
+
+                ds = MixedLeRobotAct(
+                    sources=[("droid", droid_ds), ("libero", libero_ds)],
+                    batch_size=per_device_batch_size,
+                    drop_last=bool(config['data'].get('drop_last', True)),
+                    seed=seed,
+                )
+                if global_rank == 0:
+                    droid_records = ds.source_num_records["droid"]
+                    libero_records = ds.source_num_records["libero"]
+                    libero_share = libero_records / (droid_records + libero_records)
+                    logger.info(
+                        "Mixed LeRobot records per epoch: droid=%d libero=%d libero_share=%.2f%%",
+                        droid_records,
+                        libero_records,
+                        100.0 * libero_share,
+                    )
+            else:
+                ds = droid_ds
         else:
             if dataset_format == "lerobot":
                 if task_suite == "libero_mixed":
                     ds = LiberoMixedLeRobotAct(
                         data_root=data_root,
                         normalization_suite_name=stats_suite,
+                        normalization_stats_version=stats_version,
                         history_len=history_len,
                         future_len=config['data']['future_len'],
                         full_sequence=full_sequence,
@@ -1791,12 +1929,14 @@ def train(config):
                         language_action_format=language_action_format,
                         language_action_num_bins=language_action_num_bins,
                         action_mode=action_mode,
+                        balance_suites=balance_suites,
                     )
                 else:
                     ds = LiberoLeRobotAct(
                         data_path=libero_path,
                         dataset_name=task_suite,
                         normalization_suite_name=stats_suite,
+                        normalization_stats_version=stats_version,
                         history_len=history_len,
                         future_len=config['data']['future_len'],
                         full_sequence=full_sequence,
@@ -1819,10 +1959,12 @@ def train(config):
                         language_action_format=language_action_format,
                         language_action_num_bins=language_action_num_bins,
                         action_mode=action_mode,
+                        balance_suites=balance_suites,
                     )
             elif task_suite == "libero_mixed":
                 ds = LiberoMixedAct(
                     data_root=data_root,
+                    normalization_stats_version=stats_version,
                     history_len=history_len,
                     future_len=config['data']['future_len'],
                     full_sequence=full_sequence,
@@ -1847,6 +1989,7 @@ def train(config):
                     data_path=libero_path,
                     dataset_name=task_suite,
                     normalization_suite_name=stats_suite,
+                    normalization_stats_version=stats_version,
                     history_len=history_len,
                     future_len=config['data']['future_len'],
                     full_sequence=full_sequence,
@@ -2127,6 +2270,10 @@ def train(config):
             )
             ema_checkpoint = EMACheckpoint(
                 ema_weight=ema_cfg.get('ema_weight', 0.999),
+                update_interval=ema_cfg.get(
+                    'update_interval',
+                    ema_cfg.get('save_interval', config['project']['save_interval']),
+                ),
                 save_interval=ema_cfg.get('save_interval', config['project']['save_interval']),
                 save_dir=save_dir,
                 config=config,
@@ -2135,8 +2282,9 @@ def train(config):
             )
             ema_checkpoint.load_or_initialize(start_step)
             logger.info(
-                "EMA enabled: ema_weight=%.6f save_interval=%d latest=%s final=%s",
+                "EMA enabled: ema_weight=%.6f update_interval=%d save_interval=%d latest=%s final=%s",
                 ema_checkpoint.ema_weight,
+                ema_checkpoint.update_interval,
                 ema_checkpoint.save_interval,
                 ema_checkpoint.latest_path,
                 ema_checkpoint.final_path,

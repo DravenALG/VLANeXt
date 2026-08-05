@@ -126,6 +126,7 @@ def main():
     version = config['data'].get('version', '1.0.0')
     task_suite = config['data']['task_suite_name']
     stats_suite = config['data'].get('normalization_suite_name') or task_suite
+    stats_version = config['data'].get('normalization_stats_version')
     future_len = config['data']['future_len']
     action_dim = config['model']['action_dim']
     fast_config = config['fast']
@@ -138,11 +139,11 @@ def main():
     print(f"Dataset  : {task_suite}")
     for suite_name, data_path in suite_paths:
         print(f"  - {suite_name}: {data_path}")
-    print(f"stats    : {stats_suite}")
+    print(f"stats    : {stats_suite}/{stats_version or 'original'}")
     print(f"future_len={future_len}  action_dim={action_dim}")
     print(f"scale={scale}  vocab_size={vocab_size}")
 
-    action_min, action_max = get_libero_action_stats(stats_suite)
+    action_min, action_max = get_libero_action_stats(stats_suite, stats_version)
 
     # ------------------------------------------------------------------ #
     # 1. Collect chunks

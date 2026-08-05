@@ -1,5 +1,5 @@
 project:
-  name: "codebase_lam_libero_mixed_vq"
+  name: "codebase_v3_lam_libero_mixed_vq"
   output_dir: "/data/NTU_slab/draven/checkpoints/codebase_lam"
   log_interval: 10
   save_interval: 2000
@@ -29,7 +29,7 @@ data:
   pin_memory: true
   persistent_workers: true
   prefetch_factor: 4
-  drop_last: true
+  drop_last: false
   buffer_size: 10000
 
   augmentation:

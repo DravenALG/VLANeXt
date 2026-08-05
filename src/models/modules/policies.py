@@ -2,6 +2,9 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+from src.models.modules.rope import Qwen3DActionRoPE, build_action_position_ids_after_vlm
 
 # -----------------------------------------------------------------------------
 # ----------------------------- Shared Components -----------------------------
@@ -19,6 +22,74 @@ def build_causal_action_mask(history_len, action_len, device, kv_extra_len=0):
     future_mask = torch.ones(action_len, action_len, device=device, dtype=torch.bool).triu(1)
     mask[history_len:, history_len:history_len + action_len] = future_mask
     return mask
+
+def _normalize_policy_pos_embed(policy_pos_embed):
+    policy_pos_embed = str(policy_pos_embed or "absolute").lower()
+    if policy_pos_embed not in ("absolute", "rope"):
+        raise ValueError(
+            f"Unknown policy_pos_embed: {policy_pos_embed}. Options: 'absolute', 'rope'."
+        )
+    return policy_pos_embed
+
+def _maybe_add_abs_pos(x, pos_embed):
+    if pos_embed is None:
+        return x
+    return x + pos_embed[:, :x.shape[1], :]
+
+def _build_q_position_ids(x, vlm_position_ids):
+    return build_action_position_ids_after_vlm(vlm_position_ids, x.shape[1], x.device)
+
+def _validate_rope_gen_states(policy_pos_embed, gen_hidden_states):
+    if policy_pos_embed == "rope" and gen_hidden_states is not None:
+        raise ValueError(
+            "policy_pos_embed='rope' does not support gen_hidden_states because generator "
+            "tokens do not have Qwen backbone 3D position_ids."
+        )
+
+
+class RotaryMultiheadAttention(nn.Module):
+    def __init__(self, hidden_size, num_heads, rope_theta=10000.0, mrope_section=None):
+        super().__init__()
+        if hidden_size % num_heads != 0:
+            raise ValueError(f"hidden_size {hidden_size} must be divisible by num_heads {num_heads}.")
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        self.q_proj = nn.Linear(hidden_size, hidden_size)
+        self.k_proj = nn.Linear(hidden_size, hidden_size)
+        self.v_proj = nn.Linear(hidden_size, hidden_size)
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.rope = Qwen3DActionRoPE(
+            head_dim=self.head_dim,
+            rope_theta=rope_theta,
+            mrope_section=mrope_section,
+        )
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        for module in (self.q_proj, self.k_proj, self.v_proj, self.out_proj):
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+
+    def _shape(self, x):
+        bsz, seq_len, _ = x.shape
+        return x.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
+    def forward(self, query, key, value, q_position_ids, k_position_ids, attn_mask=None):
+        q = self._shape(self.q_proj(query))
+        k = self._shape(self.k_proj(key))
+        v = self._shape(self.v_proj(value))
+
+        q = self.rope.apply_rope(q, q_position_ids)
+        k = self.rope.apply_rope(k, k_position_ids)
+
+        if attn_mask is not None and attn_mask.dtype == torch.bool:
+            additive_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
+            attn_mask = additive_mask.masked_fill(attn_mask, torch.finfo(q.dtype).min)
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        out = out.transpose(1, 2).contiguous().view(query.shape[0], query.shape[1], self.hidden_size)
+        return self.out_proj(out)
 
 class MetaQueryBlock(nn.Module):
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0):
@@ -48,10 +119,29 @@ class MetaQueryBlock(nn.Module):
 
 
 class MoEBlock(nn.Module):
-    def __init__(self, hidden_size, vlm_hidden_size, num_heads, mlp_ratio=4.0, gen_hidden_size=None):
+    def __init__(
+        self,
+        hidden_size,
+        vlm_hidden_size,
+        num_heads,
+        mlp_ratio=4.0,
+        gen_hidden_size=None,
+        policy_pos_embed="absolute",
+        rope_theta=10000.0,
+        mrope_section=None,
+    ):
         super().__init__()
+        self.policy_pos_embed = _normalize_policy_pos_embed(policy_pos_embed)
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        if self.policy_pos_embed == "rope":
+            self.attn = RotaryMultiheadAttention(
+                hidden_size,
+                num_heads,
+                rope_theta=rope_theta,
+                mrope_section=mrope_section,
+            )
+        else:
+            self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
         self.vlm_proj = nn.Linear(vlm_hidden_size, hidden_size)
         self.gen_proj = nn.Linear(gen_hidden_size, hidden_size) if gen_hidden_size is not None else None
 
@@ -67,7 +157,7 @@ class MoEBlock(nn.Module):
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c, vlm_feat, gen_feat=None, attn_mask=None):
+    def forward(self, x, c, vlm_feat, gen_feat=None, attn_mask=None, q_position_ids=None, vlm_position_ids=None):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
         x_norm = modulate(self.norm1(x), shift_msa, scale_msa)
 
@@ -77,7 +167,22 @@ class MoEBlock(nn.Module):
             kv_list.append(self.gen_proj(gen_feat))
         kv = torch.cat(kv_list, dim=1)
 
-        attn_out, _ = self.attn(query=x_norm, key=kv, value=kv, attn_mask=attn_mask)
+        if self.policy_pos_embed == "rope":
+            if q_position_ids is None or vlm_position_ids is None:
+                raise ValueError("q_position_ids and vlm_position_ids are required for RoPE MoEBlock.")
+            if gen_feat is not None and self.gen_proj is not None:
+                raise ValueError("RoPE MoEBlock does not support generator KV features.")
+            k_position_ids = torch.cat([q_position_ids, vlm_position_ids.to(device=x.device)], dim=-1)
+            attn_out = self.attn(
+                query=x_norm,
+                key=kv,
+                value=kv,
+                q_position_ids=q_position_ids,
+                k_position_ids=k_position_ids,
+                attn_mask=attn_mask,
+            )
+        else:
+            attn_out, _ = self.attn(query=x_norm, key=kv, value=kv, attn_mask=attn_mask)
         
         x = x + gate_msa.unsqueeze(1) * attn_out
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
@@ -187,22 +292,49 @@ class ActionDiffusionTransformerMetaquery(nn.Module):
 
 
 class ActionDiffusionTransformerMoE(nn.Module):
-    def __init__(self, action_dim, vlm_hidden_size, hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0, gen_hidden_size=None):
+    def __init__(
+        self,
+        action_dim,
+        vlm_hidden_size,
+        hidden_size=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4.0,
+        gen_hidden_size=None,
+        policy_pos_embed="absolute",
+        rope_theta=10000.0,
+        mrope_section=None,
+    ):
         super().__init__()
+        self.policy_pos_embed = _normalize_policy_pos_embed(policy_pos_embed)
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self.t_embedder = TimestepEmbedder(hidden_size)
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, 256, hidden_size))
+        self.pos_embed = (
+            nn.Parameter(torch.zeros(1, 256, hidden_size))
+            if self.policy_pos_embed == "absolute"
+            else None
+        )
 
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            MoEBlock(
+                hidden_size,
+                vlm_hidden_size,
+                num_heads,
+                mlp_ratio=mlp_ratio,
+                gen_hidden_size=gen_hidden_size,
+                policy_pos_embed=self.policy_pos_embed,
+                rope_theta=rope_theta,
+                mrope_section=mrope_section,
+            )
             for _ in range(depth)
         ])
         self.final_layer = FinalLayer1D(hidden_size, action_dim)
         self.initialize_weights()
 
     def initialize_weights(self):
-        nn.init.normal_(self.pos_embed, std=0.02)
+        if self.pos_embed is not None:
+            nn.init.normal_(self.pos_embed, std=0.02)
         nn.init.xavier_uniform_(self.input_proj.weight)
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
         nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
@@ -217,7 +349,16 @@ class ActionDiffusionTransformerMoE(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, noisy_action, timestep, vlm_hidden_states, history_actions=None, gen_hidden_states=None):
+    def forward(
+        self,
+        noisy_action,
+        timestep,
+        vlm_hidden_states,
+        history_actions=None,
+        gen_hidden_states=None,
+        vlm_position_ids=None,
+    ):
+        _validate_rope_gen_states(self.policy_pos_embed, gen_hidden_states)
         noisy_action = noisy_action.to(dtype=self.input_proj.weight.dtype)
 
         if history_actions is not None:
@@ -227,8 +368,11 @@ class ActionDiffusionTransformerMoE(nn.Module):
             x_input = noisy_action
 
         x = self.input_proj(x_input)
-        x = x + self.pos_embed[:, :x.shape[1], :]
+        x = _maybe_add_abs_pos(x, self.pos_embed)
         t = self.t_embedder(timestep)
+        q_position_ids = None
+        if self.policy_pos_embed == "rope":
+            q_position_ids = _build_q_position_ids(x, vlm_position_ids)
 
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
         relevant_gen_states = [None] * len(self.blocks)
@@ -239,7 +383,14 @@ class ActionDiffusionTransformerMoE(nn.Module):
             vlm_state = vlm_state.to(dtype=x.dtype)
             if gen_state is not None:
                 gen_state = gen_state.to(dtype=x.dtype)
-            x = block(x, t, vlm_state, gen_feat=gen_state)
+            x = block(
+                x,
+                t,
+                vlm_state,
+                gen_feat=gen_state,
+                q_position_ids=q_position_ids,
+                vlm_position_ids=vlm_position_ids,
+            )
 
         output = self.final_layer(x, t)
         
@@ -309,8 +460,22 @@ class ActionRegressionTransformerMetaquery(nn.Module):
         return output
 
 class ActionRegressionTransformerMoE(nn.Module):
-    def __init__(self, action_dim, vlm_hidden_size, num_actions=1, hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0, gen_hidden_size=None):
+    def __init__(
+        self,
+        action_dim,
+        vlm_hidden_size,
+        num_actions=1,
+        hidden_size=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4.0,
+        gen_hidden_size=None,
+        policy_pos_embed="absolute",
+        rope_theta=10000.0,
+        mrope_section=None,
+    ):
         super().__init__()
+        self.policy_pos_embed = _normalize_policy_pos_embed(policy_pos_embed)
         self.num_actions = num_actions
         self.action_dim = action_dim
 
@@ -319,17 +484,31 @@ class ActionRegressionTransformerMoE(nn.Module):
 
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, 256, hidden_size))
+        self.pos_embed = (
+            nn.Parameter(torch.zeros(1, 256, hidden_size))
+            if self.policy_pos_embed == "absolute"
+            else None
+        )
 
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            MoEBlock(
+                hidden_size,
+                vlm_hidden_size,
+                num_heads,
+                mlp_ratio=mlp_ratio,
+                gen_hidden_size=gen_hidden_size,
+                policy_pos_embed=self.policy_pos_embed,
+                rope_theta=rope_theta,
+                mrope_section=mrope_section,
+            )
             for _ in range(depth)
         ])
         self.final_layer = FinalLayer1D(hidden_size, action_dim)
         self.initialize_weights()
 
     def initialize_weights(self):
-        nn.init.normal_(self.pos_embed, std=0.02)
+        if self.pos_embed is not None:
+            nn.init.normal_(self.pos_embed, std=0.02)
         nn.init.normal_(self.query_embed, std=0.02)
         nn.init.xavier_uniform_(self.input_proj.weight)
         nn.init.xavier_uniform_(self.cond_proj.weight)
@@ -344,7 +523,8 @@ class ActionRegressionTransformerMoE(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, condition, history_actions=None, gen_hidden_states=None):
+    def forward(self, condition, history_actions=None, gen_hidden_states=None, vlm_position_ids=None):
+        _validate_rope_gen_states(self.policy_pos_embed, gen_hidden_states)
         vlm_hidden_states = condition
 
         final_state = vlm_hidden_states[-1]
@@ -364,7 +544,10 @@ class ActionRegressionTransformerMoE(nn.Module):
         else:
             x = queries
 
-        x = x + self.pos_embed[:, :x.shape[1], :]
+        x = _maybe_add_abs_pos(x, self.pos_embed)
+        q_position_ids = None
+        if self.policy_pos_embed == "rope":
+            q_position_ids = _build_q_position_ids(x, vlm_position_ids)
 
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
         relevant_gen_states = [None] * len(self.blocks)
@@ -375,7 +558,14 @@ class ActionRegressionTransformerMoE(nn.Module):
             vlm_state = vlm_state.to(dtype=dtype)
             if gen_state is not None:
                 gen_state = gen_state.to(dtype=dtype)
-            x = block(x, c, vlm_state, gen_feat=gen_state)
+            x = block(
+                x,
+                c,
+                vlm_state,
+                gen_feat=gen_state,
+                q_position_ids=q_position_ids,
+                vlm_position_ids=vlm_position_ids,
+            )
 
         output = self.final_layer(x, c)
         output = output[:, -self.num_actions:, :]
@@ -462,8 +652,10 @@ class ActionClassificationTransformerMoE(nn.Module):
     def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
                  fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048,
-                 gen_hidden_size=None):
+                 gen_hidden_size=None, policy_pos_embed="absolute",
+                 rope_theta=10000.0, mrope_section=None):
         super().__init__()
+        self.policy_pos_embed = _normalize_policy_pos_embed(policy_pos_embed)
         self.num_actions = num_actions
         self.action_dim = action_dim
         self.num_bins = num_bins
@@ -483,10 +675,23 @@ class ActionClassificationTransformerMoE(nn.Module):
 
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))
+        self.pos_embed = (
+            nn.Parameter(torch.zeros(1, 512, hidden_size))
+            if self.policy_pos_embed == "absolute"
+            else None
+        )
 
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            MoEBlock(
+                hidden_size,
+                vlm_hidden_size,
+                num_heads,
+                mlp_ratio=mlp_ratio,
+                gen_hidden_size=gen_hidden_size,
+                policy_pos_embed=self.policy_pos_embed,
+                rope_theta=rope_theta,
+                mrope_section=mrope_section,
+            )
             for _ in range(depth)
         ])
 
@@ -494,7 +699,8 @@ class ActionClassificationTransformerMoE(nn.Module):
         self.initialize_weights()
 
     def initialize_weights(self):
-        nn.init.normal_(self.pos_embed, std=0.02)
+        if self.pos_embed is not None:
+            nn.init.normal_(self.pos_embed, std=0.02)
         nn.init.normal_(self.query_embed, std=0.02)
         nn.init.xavier_uniform_(self.input_proj.weight)
         nn.init.xavier_uniform_(self.cond_proj.weight)
@@ -509,7 +715,8 @@ class ActionClassificationTransformerMoE(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, condition, history_actions=None, gen_hidden_states=None):
+    def forward(self, condition, history_actions=None, gen_hidden_states=None, vlm_position_ids=None):
+        _validate_rope_gen_states(self.policy_pos_embed, gen_hidden_states)
         vlm_hidden_states = condition
 
         final_state = vlm_hidden_states[-1]
@@ -529,7 +736,10 @@ class ActionClassificationTransformerMoE(nn.Module):
         else:
             x = queries
 
-        x = x + self.pos_embed[:, :x.shape[1], :]
+        x = _maybe_add_abs_pos(x, self.pos_embed)
+        q_position_ids = None
+        if self.policy_pos_embed == "rope":
+            q_position_ids = _build_q_position_ids(x, vlm_position_ids)
 
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
         relevant_gen_states = [None] * len(self.blocks)
@@ -540,7 +750,14 @@ class ActionClassificationTransformerMoE(nn.Module):
             vlm_state = vlm_state.to(dtype=dtype)
             if gen_state is not None:
                 gen_state = gen_state.to(dtype=dtype)
-            x = block(x, c, vlm_state, gen_feat=gen_state)
+            x = block(
+                x,
+                c,
+                vlm_state,
+                gen_feat=gen_state,
+                q_position_ids=q_position_ids,
+                vlm_position_ids=vlm_position_ids,
+            )
 
         output = self.final_layer(x, c)
         output = output[:, -self.total_queries:, :]
@@ -658,8 +875,10 @@ class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassifica
     def __init__(self, action_dim, vlm_hidden_size, num_actions=1, num_bins=256,
                  hidden_size=384, depth=12, num_heads=6, mlp_ratio=4.0,
                  fast_mode=False, fast_expected_seq_len=64, fast_vocab_size=2048,
-                 gen_hidden_size=None):
+                 gen_hidden_size=None, policy_pos_embed="absolute",
+                 rope_theta=10000.0, mrope_section=None):
         super().__init__()
+        self.policy_pos_embed = _normalize_policy_pos_embed(policy_pos_embed)
         self.num_actions = num_actions
         self.action_dim = action_dim
         self.num_bins = num_bins
@@ -672,10 +891,23 @@ class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassifica
         self.input_proj = nn.Linear(action_dim, hidden_size)
         self._setup_ar_tokens(hidden_size, total_queries, per_dim_classes)
         self.cond_proj = nn.Linear(vlm_hidden_size, hidden_size)
-        self.pos_embed = nn.Parameter(torch.zeros(1, 512, hidden_size))
+        self.pos_embed = (
+            nn.Parameter(torch.zeros(1, 512, hidden_size))
+            if self.policy_pos_embed == "absolute"
+            else None
+        )
 
         self.blocks = nn.ModuleList([
-            MoEBlock(hidden_size, vlm_hidden_size, num_heads, mlp_ratio=mlp_ratio, gen_hidden_size=gen_hidden_size)
+            MoEBlock(
+                hidden_size,
+                vlm_hidden_size,
+                num_heads,
+                mlp_ratio=mlp_ratio,
+                gen_hidden_size=gen_hidden_size,
+                policy_pos_embed=self.policy_pos_embed,
+                rope_theta=rope_theta,
+                mrope_section=mrope_section,
+            )
             for _ in range(depth)
         ])
 
@@ -683,7 +915,8 @@ class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassifica
         self.initialize_weights()
 
     def initialize_weights(self):
-        nn.init.normal_(self.pos_embed, std=0.02)
+        if self.pos_embed is not None:
+            nn.init.normal_(self.pos_embed, std=0.02)
         self._init_ar_weights()
         nn.init.xavier_uniform_(self.input_proj.weight)
         nn.init.xavier_uniform_(self.cond_proj.weight)
@@ -698,7 +931,16 @@ class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassifica
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, condition, target_ids=None, generated_ids=None, history_actions=None, gen_hidden_states=None):
+    def forward(
+        self,
+        condition,
+        target_ids=None,
+        generated_ids=None,
+        history_actions=None,
+        gen_hidden_states=None,
+        vlm_position_ids=None,
+    ):
+        _validate_rope_gen_states(self.policy_pos_embed, gen_hidden_states)
         vlm_hidden_states = condition
         final_state = vlm_hidden_states[-1]
         dtype = self.input_proj.weight.dtype
@@ -719,7 +961,10 @@ class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassifica
         else:
             x = action_emb
 
-        x = x + self.pos_embed[:, :x.shape[1], :]
+        x = _maybe_add_abs_pos(x, self.pos_embed)
+        q_position_ids = None
+        if self.policy_pos_embed == "rope":
+            q_position_ids = _build_q_position_ids(x, vlm_position_ids)
 
         relevant_vlm_states = vlm_hidden_states[-len(self.blocks):]
         relevant_gen_states = [None] * len(self.blocks)
@@ -733,7 +978,15 @@ class ActionClassificationTransformerMoEAutoregressive(_AutoregressiveClassifica
             uses_gen = gen_state is not None and block.gen_proj is not None
             kv_extra_len = vlm_state.shape[1] + (gen_state.shape[1] if uses_gen else 0)
             attn_mask = build_causal_action_mask(history_len, action_len, x.device, kv_extra_len=kv_extra_len)
-            x = block(x, c, vlm_state, gen_feat=gen_state, attn_mask=attn_mask)
+            x = block(
+                x,
+                c,
+                vlm_state,
+                gen_feat=gen_state,
+                attn_mask=attn_mask,
+                q_position_ids=q_position_ids,
+                vlm_position_ids=vlm_position_ids,
+            )
 
         output = self.final_layer(x, c)
         return output[:, -action_len:, :]

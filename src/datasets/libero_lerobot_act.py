@@ -11,6 +11,7 @@ from torch.utils.data import IterableDataset
 from src.datasets.libero_act import (
     get_libero_action_stats,
     normalize_image_resize_size,
+    normalize_libero_action_stats_version,
     resize_frame_uint8,
 )
 from src.datasets.language_action import (
@@ -140,6 +141,8 @@ class _LiberoLeRobotBase(IterableDataset):
         language_action_format="vla-0",
         language_action_num_bins=1000,
         action_mode="libero",
+        balance_suites=False,
+        normalization_stats_version=None,
     ):
         super().__init__()
         self.suite_paths = suite_paths
@@ -173,7 +176,9 @@ class _LiberoLeRobotBase(IterableDataset):
         self.language_action_format = normalize_language_action_format(language_action_format)
         self.language_action_num_bins = int(language_action_num_bins)
         self.action_mode = str(action_mode or "libero").lower()
+        self.balance_suites = bool(balance_suites)
         self.action_dim = None
+        self.normalization_stats_version = normalize_libero_action_stats_version(normalization_stats_version)
 
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be positive, got {batch_size}")
@@ -188,11 +193,13 @@ class _LiberoLeRobotBase(IterableDataset):
 
         self._episodes = []
         self._num_records_per_epoch = 0
+        self._suite_sample_counts = OrderedDict((suite_name, 0) for suite_name, _ in self.suite_paths)
         self._epoch = 0
         self._task_maps = {}
         self._episode_cache = OrderedDict()
         self._episode_arrays_preloaded = False
         self._load_metadata()
+        self._finalize_epoch_length()
         self._init_action_padding()
         self._preload_episode_arrays()
 
@@ -235,7 +242,10 @@ class _LiberoLeRobotBase(IterableDataset):
         if self.load_language_action and self.action_mode != "libero":
             raise ValueError("language-action labels are only supported for LIBERO 7D actions.")
         if self.action_mode == "libero":
-            self.action_min, self.action_max = get_libero_action_stats(self.normalization_suite_name)
+            self.action_min, self.action_max = get_libero_action_stats(
+                self.normalization_suite_name,
+                self.normalization_stats_version,
+            )
             self.action_denominator = self.action_max - self.action_min
             self.action_denominator = np.where(self.action_denominator == 0, 1.0, self.action_denominator)
 
@@ -333,7 +343,7 @@ class _LiberoLeRobotBase(IterableDataset):
                 if not os.path.isfile(main_video_path):
                     raise FileNotFoundError(f"LeRobot video not found: {main_video_path}")
 
-                episode_id = len(self._episodes)
+                sample_count = self._get_episode_sample_count(traj_len)
                 self._episodes.append(
                     {
                         "suite_name": suite_name,
@@ -353,11 +363,30 @@ class _LiberoLeRobotBase(IterableDataset):
                     }
                 )
 
-                self._num_records_per_epoch += self._get_episode_sample_count(traj_len)
+                self._num_records_per_epoch += sample_count
+                self._suite_sample_counts[suite_name] += sample_count
 
+    def _finalize_epoch_length(self):
         if self._num_records_per_epoch <= 0:
             roots = ", ".join(path for _, path in self.suite_paths)
             raise RuntimeError(f"No LeRobot training frames found under: {roots}")
+
+        if not self.balance_suites:
+            return
+
+        empty_suites = [
+            suite_name
+            for suite_name, sample_count in self._suite_sample_counts.items()
+            if sample_count <= 0
+        ]
+        if empty_suites:
+            raise RuntimeError(
+                "Cannot balance suites with zero valid samples: "
+                f"{', '.join(empty_suites)}"
+            )
+
+        max_suite_samples = max(self._suite_sample_counts.values())
+        self._num_records_per_epoch = max_suite_samples * len(self._suite_sample_counts)
 
     def _get_valid_length(self, traj_len):
         traj_len = int(traj_len)
@@ -480,6 +509,11 @@ class _LiberoLeRobotBase(IterableDataset):
     def _build_epoch_records(self, epoch):
         rng = np.random.default_rng(self.seed + int(epoch))
         records = []
+        records_by_suite = (
+            OrderedDict((suite_name, []) for suite_name, _ in self.suite_paths)
+            if self.balance_suites
+            else None
+        )
         for episode_id, episode in enumerate(self._episodes):
             valid_len = int(episode["valid_length"])
             if valid_len <= 0:
@@ -491,12 +525,45 @@ class _LiberoLeRobotBase(IterableDataset):
                 sample_count = min(valid_len, max(1, int(valid_len * float(self.sampling_rate))))
                 frame_indices = rng.choice(valid_len, size=sample_count, replace=False)
 
-            records.extend((episode_id, int(frame_index)) for frame_index in frame_indices)
+            episode_records = [(episode_id, int(frame_index)) for frame_index in frame_indices]
+            if self.balance_suites:
+                records_by_suite[episode["suite_name"]].extend(episode_records)
+            else:
+                records.extend(episode_records)
+
+        if self.balance_suites:
+            records = self._balance_suite_records(records_by_suite, rng)
 
         if records:
             order = rng.permutation(len(records))
             records = [records[int(i)] for i in order]
         return records
+
+    @staticmethod
+    def _balance_suite_records(records_by_suite, rng):
+        suite_counts = {suite: len(records) for suite, records in records_by_suite.items()}
+        empty_suites = [suite for suite, count in suite_counts.items() if count <= 0]
+        if empty_suites:
+            raise RuntimeError(
+                "Cannot balance suites with zero valid samples: "
+                f"{', '.join(empty_suites)}"
+            )
+
+        target_count = max(suite_counts.values())
+        balanced_records = []
+        for suite_records in records_by_suite.values():
+            if len(suite_records) < target_count:
+                extra_indices = rng.choice(
+                    len(suite_records),
+                    size=target_count - len(suite_records),
+                    replace=True,
+                )
+                suite_records = suite_records + [
+                    suite_records[int(index)]
+                    for index in extra_indices
+                ]
+            balanced_records.extend(suite_records)
+        return balanced_records
 
     # for a batch of (episode_id, frame_index) records, load the corresponding data and build the batch dict.
     def _build_batch(self, records):
@@ -666,18 +733,20 @@ class LiberoLeRobotAct(_LiberoLeRobotBase):
         data_path,
         dataset_name="libero",
         normalization_suite_name=None,
+        normalization_stats_version=None,
         **kwargs,
     ):
         super().__init__(
             suite_paths=[(dataset_name, data_path)],
             dataset_name=dataset_name,
             normalization_suite_name=normalization_suite_name,
+            normalization_stats_version=normalization_stats_version,
             **kwargs,
         )
 
 
 class LiberoMixedLeRobotAct(_LiberoLeRobotBase):
-    """LeRobot LIBERO mixed loader with one global random frame index pool."""
+    """LeRobot LIBERO mixed loader with optional suite-balanced sampling."""
 
     SUITES = ("libero_spatial", "libero_object", "libero_goal", "libero_10")
 
@@ -686,11 +755,165 @@ class LiberoMixedLeRobotAct(_LiberoLeRobotBase):
         data_root,
         dataset_name="libero_mixed",
         normalization_suite_name="libero_mixed",
+        normalization_stats_version=None,
         **kwargs,
     ):
         super().__init__(
             suite_paths=[(suite, os.path.join(data_root, suite)) for suite in self.SUITES],
             dataset_name=dataset_name,
             normalization_suite_name=normalization_suite_name,
+            normalization_stats_version=normalization_stats_version,
             **kwargs,
         )
+
+
+def _expand_lerobot_suites(suites):
+    expanded = []
+    for suite in suites:
+        if suite == "libero_mixed":
+            expanded.extend(LiberoMixedLeRobotAct.SUITES)
+        else:
+            expanded.append(suite)
+    return list(OrderedDict.fromkeys(expanded))
+
+
+def _compute_lerobot_suite_action_stats(suite_root, suite_name, action_dims=6):
+    info_path = os.path.join(suite_root, "meta", "info.json")
+    episodes_path = os.path.join(suite_root, "meta", "episodes.jsonl")
+    if not os.path.isfile(info_path):
+        raise FileNotFoundError(f"LeRobot info.json not found: {info_path}")
+    if not os.path.isfile(episodes_path):
+        raise FileNotFoundError(f"LeRobot episodes.jsonl not found: {episodes_path}")
+
+    with open(info_path, "r") as f:
+        info = json.load(f)
+
+    data_template = info.get(
+        "data_path",
+        "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+    )
+    chunks_size = int(info.get("chunks_size", 1000))
+    episodes = _read_jsonl(episodes_path)
+
+    from tqdm import tqdm
+
+    total_trajs = len(episodes)
+    success_trajs = 0
+    total_samples = 0
+    action_min = np.full(action_dims, np.inf, dtype=np.float32)
+    action_max = np.full(action_dims, -np.inf, dtype=np.float32)
+
+    for episode in tqdm(episodes, total=total_trajs, unit="traj", desc=suite_name):
+        episode_index = int(episode["episode_index"])
+        episode_chunk = episode_index // chunks_size
+        parquet_path = _format_lerobot_path(
+            suite_root,
+            data_template,
+            episode_chunk=episode_chunk,
+            episode_index=episode_index,
+        )
+        if not os.path.isfile(parquet_path):
+            raise FileNotFoundError(f"LeRobot parquet not found: {parquet_path}")
+
+        df = pd.read_parquet(parquet_path)
+        if len(df) == 0:
+            continue
+        if "reward" in df.columns:
+            reward = df["reward"].to_numpy()
+            if reward.size == 0 or not np.isclose(float(reward[-1]), 1.0):
+                continue
+
+        actions = np.stack(df["action"].to_numpy()).astype(np.float32)
+        if actions.ndim == 1:
+            actions = actions[:, None]
+        if actions.shape[1] < action_dims:
+            raise ValueError(
+                f"Expected at least {action_dims} action dims in {parquet_path}, got {actions.shape[1]}"
+            )
+        actions = actions[:, :action_dims]
+
+        current_min = np.min(actions, axis=0)
+        current_max = np.max(actions, axis=0)
+        action_min = np.minimum(action_min, current_min)
+        action_max = np.maximum(action_max, current_max)
+        success_trajs += 1
+        total_samples += actions.shape[0]
+
+    return {
+        "total_trajs": total_trajs,
+        "success_trajs": success_trajs,
+        "total_samples": total_samples,
+        "action_min": None if success_trajs == 0 else action_min,
+        "action_max": None if success_trajs == 0 else action_max,
+    }
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Compute LIBERO LeRobot action min/max statistics."
+    )
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default="/data/NTU_slab/draven/data/LIBERO_fastwam",
+        help="Root directory that contains the LeRobot LIBERO suites.",
+    )
+    parser.add_argument(
+        "--suites",
+        nargs="*",
+        default=["libero_mixed"],
+        help="Suite names to scan. Use libero_mixed to expand to the four standard suites.",
+    )
+    args = parser.parse_args()
+
+    suites = _expand_lerobot_suites(args.suites)
+    print(f"Scanning LeRobot LIBERO datasets in {args.data_root}...")
+
+    mixed_total_trajs = 0
+    mixed_success_trajs = 0
+    mixed_total_samples = 0
+    mixed_act_min = np.full(6, np.inf, dtype=np.float32)
+    mixed_act_max = np.full(6, -np.inf, dtype=np.float32)
+    mixed_has_stats = False
+
+    for suite_name in suites:
+        suite_root = os.path.join(args.data_root, suite_name)
+        if not os.path.isdir(suite_root):
+            print(f"\nSkipping {suite_name}: directory not found: {suite_root}")
+            continue
+
+        stats = _compute_lerobot_suite_action_stats(suite_root, suite_name)
+
+        print(f"\n--- {suite_name} Stats ---")
+        print(f"Total Trajectories: {stats['total_trajs']}")
+        print(f"Successful Trajs:   {stats['success_trajs']}")
+        if stats["success_trajs"] > 0:
+            print(f"Avg Samples/Succ:   {stats['total_samples'] / stats['success_trajs']:.4f}")
+            print(f"action_min = {stats['action_min'].tolist()}")
+            print(f"action_max = {stats['action_max'].tolist()}")
+            mixed_act_min = np.minimum(mixed_act_min, stats["action_min"])
+            mixed_act_max = np.maximum(mixed_act_max, stats["action_max"])
+            mixed_has_stats = True
+        else:
+            print("Avg Samples/Succ:   n/a")
+            print("action_min = []")
+            print("action_max = []")
+
+        mixed_total_trajs += stats["total_trajs"]
+        mixed_success_trajs += stats["success_trajs"]
+        mixed_total_samples += stats["total_samples"]
+
+    print(f"\n--- libero_mixed Stats (union of {', '.join(suites)}) ---")
+    print(f"Total Trajectories: {mixed_total_trajs}")
+    print(f"Successful Trajs:   {mixed_success_trajs}")
+    if mixed_success_trajs > 0:
+        print(f"Avg Samples/Succ:   {mixed_total_samples / mixed_success_trajs:.4f}")
+    else:
+        print("Avg Samples/Succ:   n/a")
+    if mixed_has_stats:
+        print(f"action_min_mixed = {mixed_act_min.tolist()}")
+        print(f"action_max_mixed = {mixed_act_max.tolist()}")
+    else:
+        print("No successful trajectories found in the selected suites.")

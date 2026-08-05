@@ -59,48 +59,35 @@ You also need to download the assets; see [LIBERO-plus](https://github.com/sylve
 ONE [Config](config/libero_train_config.yaml), ONE [Training Code](scripts/train.py), and ONE [Model Code](src/models/VLANeXt.py) for ALL. See [TUTORIAL.md](./TUTORIAL.md) for a simple tutorial on how to configure each setting. Below is a brief introduction to the commands used.
 
 ### FAST Token Construction
-For classification with FAST tokenization, you need to construct the FAST tokenizer first.
-
-**Run Construction**:
+**Run Training**:
 ```bash
-python scripts/train_FAST.py --config config/libero_train_fast_config.yaml
+python -m scripts.train_FAST --config config/libero_train_fast_config.yaml
 ```
 
-### Latent Action Training
-The standard latent action training pipeline is: 1) train the latent action models (LAM); 2) generate latent actions using our learned LAM; 3) pretrain the policy model using the generated latent actions; and 4) fine-tune the policy model with real actions. We can simply use the complete LIBERO dataset for latent action pretraining, and fine-tune the models in one suite with real action labels.
+Then you can train with FAST tokenizer by set `loss_type=classification` and `fast_action_tokenizer.enable=true` in training config.
 
-**Latent Action Models Learning**:
+### Latent Action Training
+LAM first learns a latent-action encoder/decoder, then uses it to create a
+LeRobot LIBERO copy whose `action` column stores latent actions.
+
 ```bash
+# Single GPU
+CUDA_VISIBLE_DEVICES=0 python -m scripts.train_lam --config config/libero_train_lam_config.yaml
+
+# Multi-GPU
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --standalone --nproc_per_node=8 scripts/train_lam.py --config config/libero_train_lam_config.yaml
 ```
 
-**Generate Latent Actions**:
+Then generate latent-action data:
 ```bash
-CUDA_VISIBLE_DEVICES=0 python scripts/generate_lam.py --checkpoint /data/NTU_slab/draven/checkpoints/codebase_lam/codebase_lam_libero_mixed_vae/checkpoint_final.pt --source-root /data/NTU_slab/draven/data/LIBERO_fastwam --output-root /data/NTU_slab/draven/data/LIBERO_fastwam_lam --overwrite
+CUDA_VISIBLE_DEVICES=0 python scripts/generate_lam.py --checkpoint /data/NTU_slab/draven/checkpoints/codebase_lam/codebase_lam_libero_mixed_vae/checkpoint_final.pt --source-root /data/NTU_slab/draven/data/LIBERO_fastwam --output-root /data/NTU_slab/draven/data/LIBERO_fastwam_lam_vae --overwrite
 ```
 
-**Latent Action Pretraining and Fine-tuning**:
+After that, you can pretrain the model with latent action data by seting `data_root=/data/NTU_slab/draven/data/LIBERO_fastwam_lam` and `action_mode=latent`. After pretraining, finetune it using the following LIBERO Training commend.
 
-For latent action pretraining, you just need to modify the training config file with the latent actions dataset.
-```bash
-data:
-    data_root: "/data/NTU_slab/draven/data/LIBERO_fastwam_lam"
-    action_mode: "latent"
-model:
-    action_dim: <same as LAM latent_dim>
-```
-For fine-tuning, you just need to switch the config file back.
-```bash
-data:
-    data_root: "/data/NTU_slab/draven/data/LIBERO_fastwam"
-    action_mode: "libero"
-model:
-    action_dim: 7
-```
 
 ### LIBERO Training
-
-For the dataset in TFDS format, refer to [OpenVLA](https://github.com/openvla/openvla).
+For more details, please refer to the [OpenVLA](https://github.com/openvla/openvla), which modifies the original dataset in LIBERO for training VLAs.
 
 **Download**:
 ```bash
@@ -108,18 +95,15 @@ hf download openvla/modified_libero_rlds --repo-type dataset --local-dir LIBERO_
 ```
 
 For the dataset in lerobot format, refer to the [FastWAM](https://github.com/yuantianyuan01/FastWAM.git).
-
 **Download**:
 ```bash
 hf download yuanty/LIBERO-fastwam --repo-type dataset --local-dir LIBERO_fastwam
 
-# Build frames to speed up training
-python src/datasets/build_libero_lerobot_frame_cache.py /data/NTU_slab/draven/data/LIBERO_fastwam
+# build frames to speed up training
+python src/datasets/build_libero_lerobot_frame_cache.py /data/NTU_slab/draven/data/LIBERO_fastwam --resize-size 256
 ```
 
 **Run Training**:
-
-After downloading the dataset, we can simply train the model using:
 ```bash
 # Single GPU
 CUDA_VISIBLE_DEVICES=0 python -m scripts.train --config config/libero_train_config.yaml
@@ -129,7 +113,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun --standalone --nproc_per_node=8 -m
 ```
 
 ### DROID Training
-The official DROID dataset is available from [DROID](https://droid-dataset.github.io). Here, we use a reorganized and filtered DROID dataset proposed by [MolmoAct2](https://github.com/allenai/molmoact2).
+The official DROID dataset is in [DROID](https://droid-dataset.github.io). Here, we use a reorganize and filtterd DROID dataset proposed by [MolmoAct2](https://github.com/allenai/molmoact2).
 
 **Download**:
 ```bash
@@ -137,8 +121,6 @@ hf download allenai/MolmoAct2-DROID-Dataset --repo-type dataset --local-dir Molm
 ```
 
 **Run Training**:
-
-After downloading the dataset, we can simply train the model using:
 ```bash
 # Single GPU
 CUDA_VISIBLE_DEVICES=0 python -m scripts.train --config config/droid_train_config.yaml

@@ -26,6 +26,7 @@ wcwidth==0.2.13
 # for LIBERO benchmark
 imageio[ffmpeg]
 robosuite==1.4.1
+mujoco==3.8.1
 bddl
 easydict
 cloudpickle

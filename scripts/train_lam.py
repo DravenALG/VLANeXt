@@ -197,6 +197,7 @@ def build_dataloader(config, per_device_batch_size, seed):
         image_resize_size=data_cfg.get("image_resize_size", 128),
         action_mode=data_cfg.get("action_mode", "libero"),
         length=data_cfg.get("length", None),
+        normalization_stats_version=data_cfg.get("normalization_stats_version"),
     )
     if task_suite == "libero_mixed":
         dataset = LiberoMixedLeRobotAct(

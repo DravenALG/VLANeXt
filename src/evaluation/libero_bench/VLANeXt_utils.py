@@ -111,6 +111,7 @@ def get_vla(cfg):
         policy_depth=model_config.get('policy_depth', 29),
         policy_num_heads=model_config.get('policy_num_heads', 12),
         policy_mlp_ratio=model_config.get('policy_mlp_ratio', 4.0),
+        policy_pos_embed=model_config.get('policy_pos_embed', 'absolute'),
         use_proprio_input_vlm=model_config.get('use_proprio_input_vlm', True),
         use_action_input_policy=use_action_input_policy,
         use_transformer_proprio_projector=use_transformer_proprio_projector,

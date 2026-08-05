@@ -35,14 +35,26 @@ class LlamaProcessorWrapper:
         self.image_processor = image_processor
 
 def _load_backbone(model_cls, model_path, use_pretrained_backbone=True, **kwargs):
+    resolved_model_path = _resolve_hf_snapshot_path(model_path)
     if use_pretrained_backbone:
-        return model_cls.from_pretrained(model_path, dtype=torch.bfloat16, **kwargs)
+        return model_cls.from_pretrained(resolved_model_path, dtype=torch.bfloat16, **kwargs)
 
-    config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+    config = AutoConfig.from_pretrained(resolved_model_path, trust_remote_code=True)
     attn_implementation = kwargs.get("_attn_implementation") or kwargs.get("attn_implementation")
     if attn_implementation is not None:
         config._attn_implementation = attn_implementation
     return model_cls(config).to(dtype=torch.bfloat16)
+
+
+def _resolve_hf_snapshot_path(model_path):
+    if os.path.isdir(model_path):
+        return model_path
+    try:
+        from huggingface_hub import snapshot_download
+
+        return snapshot_download(repo_id=model_path, local_files_only=True)
+    except Exception:
+        return model_path
 
 class VLANeXt(nn.Module):
 
@@ -70,6 +82,7 @@ class VLANeXt(nn.Module):
         policy_depth=24,
         policy_num_heads=16,
         policy_mlp_ratio=4.0,
+        policy_pos_embed="absolute", # Options: "absolute", "rope"
         use_proprio_input_vlm=True,
         use_action_input_policy=False,
         use_transformer_proprio_projector=True,
@@ -125,34 +138,37 @@ class VLANeXt(nn.Module):
             self.hidden_size = self.lmm.hidden_size
         elif "paligemma" in lmm_path.lower():
             self.model_family = "paligemma"
+            resolved_lmm_path = _resolve_hf_snapshot_path(lmm_path)
             self.lmm = _load_backbone(
                 PaliGemmaForConditionalGeneration,
-                lmm_path,
+                resolved_lmm_path,
                 use_pretrained_backbone,
                 _attn_implementation=attn_implementation,
             )
-            self.processor = AutoProcessor.from_pretrained(lmm_path, trust_remote_code=True)
+            self.processor = AutoProcessor.from_pretrained(resolved_lmm_path, trust_remote_code=True)
             if hasattr(self.lmm.config, "text_config"):
                 self.hidden_size = self.lmm.config.text_config.hidden_size
             else:
                 self.hidden_size = self.lmm.config.hidden_size
         elif "llama" in lmm_path.lower():
             self.model_family = "llama"
+            resolved_lmm_path = _resolve_hf_snapshot_path(lmm_path)
+            resolved_vision_encoder_path = _resolve_hf_snapshot_path(vision_encoder_path)
             self.lmm = _load_backbone(
                 LlamaForCausalLM,
-                lmm_path,
+                resolved_lmm_path,
                 use_pretrained_backbone,
                 attn_implementation=attn_implementation,
             )
             self.vision_encoder = _load_backbone(
                 SiglipVisionModel,
-                vision_encoder_path,
+                resolved_vision_encoder_path,
                 use_pretrained_backbone,
                 attn_implementation=attn_implementation,
             )
-            tokenizer = AutoTokenizer.from_pretrained(lmm_path)
+            tokenizer = AutoTokenizer.from_pretrained(resolved_lmm_path)
             if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
-            image_processor = SiglipImageProcessor.from_pretrained(vision_encoder_path)
+            image_processor = SiglipImageProcessor.from_pretrained(resolved_vision_encoder_path)
             self.processor = LlamaProcessorWrapper(tokenizer, image_processor)
             self.hidden_size = self.lmm.config.hidden_size
             self.vision_projector = nn.Sequential(
@@ -166,37 +182,33 @@ class VLANeXt(nn.Module):
             )
         elif "qwen3_5" in lmm_path.lower() or "qwen3.5" in lmm_path.lower():
             self.model_family = "qwen"
+            resolved_lmm_path = _resolve_hf_snapshot_path(lmm_path)
             self.lmm = _load_backbone(
                 Qwen3_5ForConditionalGeneration,
-                lmm_path,
+                resolved_lmm_path,
                 use_pretrained_backbone,
                 _attn_implementation=attn_implementation,
             )
-            self.processor = AutoProcessor.from_pretrained(lmm_path, trust_remote_code=True)
+            self.processor = AutoProcessor.from_pretrained(resolved_lmm_path, trust_remote_code=True)
             if hasattr(self.lmm.config, "text_config"):
                 self.hidden_size = self.lmm.config.text_config.hidden_size
             else:
                 self.hidden_size = self.lmm.config.hidden_size
         elif "qwen3-vl" in lmm_path.lower():
             self.model_family = "qwen"
+            resolved_lmm_path = _resolve_hf_snapshot_path(lmm_path)
             self.lmm = _load_backbone(
                 Qwen3VLForConditionalGeneration,
-                lmm_path,
+                resolved_lmm_path,
                 use_pretrained_backbone,
                 _attn_implementation=attn_implementation,
             )
-            self.processor = AutoProcessor.from_pretrained(lmm_path, trust_remote_code=True)
+            self.processor = AutoProcessor.from_pretrained(resolved_lmm_path, trust_remote_code=True)
             if hasattr(self.lmm.config, "text_config"):
                 self.hidden_size = self.lmm.config.text_config.hidden_size
             else:
                 self.hidden_size = self.lmm.config.hidden_size
         
-        self.configure_backbone_trainability(
-            backbone_mode,
-            train_text_embedding=train_text_embedding,
-            train_vision_encoder=train_vision_encoder,
-        )
-
         if gradient_checkpointing:
             if self.model_family == "wan":
                 if hasattr(self.lmm.dit, "gradient_checkpointing_enable"):
@@ -231,6 +243,16 @@ class VLANeXt(nn.Module):
         self.num_history = num_history
         self.num_bins = num_bins
         self.condition_type = condition_type
+        self.policy_pos_embed = str(policy_pos_embed or "absolute").lower()
+        if self.policy_pos_embed not in ("absolute", "rope"):
+            raise ValueError(
+                f"Unknown policy_pos_embed: {self.policy_pos_embed}. Options: 'absolute', 'rope'."
+            )
+        if self.policy_pos_embed == "rope":
+            if self.model_family != "qwen":
+                raise ValueError("policy_pos_embed='rope' currently only supports Qwen backbones.")
+            if self.condition_type not in ("tight", "soft"):
+                raise ValueError("policy_pos_embed='rope' only supports tight/soft conditioning.")
         self.use_proprio_input_vlm = use_proprio_input_vlm
         self.use_action_input_policy = use_action_input_policy
         self.is_video_generation_backbone = self.model_family == "wan"
@@ -258,6 +280,11 @@ class VLANeXt(nn.Module):
             language_action_loss_weight = 0.0
         self.future_image_loss_weight = float(future_image_loss_weight)
         self.enable_future_image_loss = self.future_image_loss_weight > 0
+        if self.policy_pos_embed == "rope" and self.enable_future_image_loss:
+            raise ValueError(
+                "policy_pos_embed='rope' does not support future_image_loss_weight > 0 because "
+                "generator hidden states do not have Qwen 3D position_ids."
+            )
         self.future_image_num_tokens = int(future_image_num_tokens)
         self.future_image_prediction_type = future_image_prediction_type
         self.future_image_dino_image_size = int(future_image_dino_image_size)
@@ -275,7 +302,12 @@ class VLANeXt(nn.Module):
                 f"Unknown future_image_prediction_type: {self.future_image_prediction_type}. "
                 "Options: 'emu_token', 'dinov3_flow'."
             )
-        
+
+        self.configure_backbone_trainability(
+            backbone_mode,
+            train_text_embedding=train_text_embedding,
+            train_vision_encoder=train_vision_encoder,
+        )
 
         self.fast_tokenizer = None
         self.fast_vocab_size = None
@@ -342,14 +374,15 @@ class VLANeXt(nn.Module):
             )
         elif self.enable_future_image_loss and self.future_image_prediction_type == "dinov3_flow":
             print(f"Initializing DINOv3 future feature flow generator: {future_image_dino_model_path}")
+            resolved_future_image_dino_model_path = _resolve_hf_snapshot_path(future_image_dino_model_path)
             size = {"height": self.future_image_dino_image_size, "width": self.future_image_dino_image_size}
             self.future_image_processor = AutoImageProcessor.from_pretrained(
-                future_image_dino_model_path,
+                resolved_future_image_dino_model_path,
                 size=size,
                 trust_remote_code=True,
             )
             self.dino_model = AutoModel.from_pretrained(
-                future_image_dino_model_path,
+                resolved_future_image_dino_model_path,
                 dtype=torch.bfloat16,
                 trust_remote_code=True,
             )
@@ -373,6 +406,14 @@ class VLANeXt(nn.Module):
             )
 
         gen_hidden_dim = generator_hidden_size if self.enable_future_image_loss else None
+        policy_position_kwargs = {"policy_pos_embed": self.policy_pos_embed}
+        if self.policy_pos_embed == "rope":
+            text_config = getattr(self.lmm.config, "text_config", self.lmm.config)
+            rope_parameters = getattr(text_config, "rope_parameters", {}) or {}
+            policy_position_kwargs.update(
+                rope_theta=rope_parameters.get("rope_theta", 10000.0),
+                mrope_section=rope_parameters.get("mrope_section", None),
+            )
 
         if self.use_proprio_input_vlm:
             projector_input_dim = action_dim
@@ -392,7 +433,8 @@ class VLANeXt(nn.Module):
             self.wan_proprio_projector = nn.Linear(action_dim, int(self.lmm.dit.text_dim))
         
         self.meta_queries = nn.Parameter(
-            torch.randn(num_queries, self.hidden_size)
+            torch.randn(num_queries, self.hidden_size),
+            requires_grad=self.condition_type != "tight",
         )
         if self.condition_type == "loose":
             if use_transformer_connector:
@@ -422,6 +464,7 @@ class VLANeXt(nn.Module):
                     num_heads=policy_num_heads,
                     mlp_ratio=policy_mlp_ratio,
                     gen_hidden_size=gen_hidden_dim,
+                    **policy_position_kwargs,
                 )
             elif condition_type == "loose":
                 self.action_head = ActionRegressionTransformerMetaquery(
@@ -471,6 +514,7 @@ class VLANeXt(nn.Module):
                 self.action_head = moe_cls(
                     vlm_hidden_size=self.hidden_size,
                     gen_hidden_size=gen_hidden_dim,
+                    **policy_position_kwargs,
                     **head_kwargs,
                 )
             else:
@@ -486,6 +530,7 @@ class VLANeXt(nn.Module):
                     num_heads=policy_num_heads,
                     mlp_ratio=policy_mlp_ratio,
                     gen_hidden_size=gen_hidden_dim,
+                    **policy_position_kwargs,
                 )
             elif condition_type == "loose":
                 self.action_head = ActionDiffusionTransformerMetaquery(
@@ -583,6 +628,34 @@ class VLANeXt(nn.Module):
             and hasattr(self.action_head, "input_proj")
         ):
             self.action_head.input_proj.requires_grad_(False)
+
+        # Tight conditioning uses backbone hidden states directly, without meta queries.
+        if hasattr(self, "meta_queries"):
+            self.meta_queries.requires_grad_(self.condition_type != "tight")
+
+        self._configure_output_embedding_trainability()
+
+    def _get_output_embedding_module(self):
+        if hasattr(self.lmm, "get_output_embeddings"):
+            output_embeddings = self.lmm.get_output_embeddings()
+            if output_embeddings is not None:
+                return output_embeddings
+        if hasattr(self.lmm, "lm_head"):
+            return self.lmm.lm_head
+        language_model = getattr(self.lmm, "language_model", None)
+        if language_model is not None and hasattr(language_model, "lm_head"):
+            return language_model.lm_head
+        if hasattr(self.lmm, "model") and hasattr(self.lmm.model, "lm_head"):
+            return self.lmm.model.lm_head
+        return None
+
+    def _configure_output_embedding_trainability(self):
+        output_embeddings = self._get_output_embedding_module()
+        if output_embeddings is None:
+            return
+        if bool(getattr(self.lmm.config, "tie_word_embeddings", False)):
+            return
+        output_embeddings.requires_grad_(bool(self.enable_language_action_loss))
 
     # -----------------------------------------------------------------------------
     # ------------------------ Conditions from Backbone ---------------------------
@@ -747,7 +820,7 @@ class VLANeXt(nn.Module):
             hidden_states = tuple(state.detach() for state in hidden_states)
         connector_out = None
         loss_language_action = None
-        result = (connector_out, hidden_states, loss_language_action)
+        result = (connector_out, hidden_states, loss_language_action, None)
         if return_video_pred:
             result = result + (pred_video,)
         if return_last_hidden_state:
@@ -830,6 +903,8 @@ class VLANeXt(nn.Module):
     # Utilities for generating VLM conditions from Qwen
     def _get_vlm_condition_qwen(self, input_ids, attention_mask, proprioception, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, mm_token_type_ids=None, language_action_labels=None, append_meta_queries=True, return_last_hidden_state=False):
         B = input_ids.shape[0]
+        if mm_token_type_ids is None:
+            raise ValueError("Qwen conditioning requires mm_token_type_ids to build 3D position_ids.")
 
         backbone = self.lmm.model
         lmm_config = self.lmm.config
@@ -906,7 +981,7 @@ class VLANeXt(nn.Module):
             if self.policy_gradient_stop_for_vlm:
                 query_outputs = query_outputs.detach()
             connector_out = self.connector(query_outputs)
-        result = (connector_out, hidden_states, loss_language_action)
+        result = (connector_out, hidden_states, loss_language_action, position_ids)
         return result + (outputs.last_hidden_state,) if return_last_hidden_state else result
 
     # Utilities for generating VLM conditions from LLama
@@ -986,7 +1061,7 @@ class VLANeXt(nn.Module):
             if self.policy_gradient_stop_for_vlm:
                 query_outputs = query_outputs.detach()
             connector_out = self.connector(query_outputs)
-        result = (connector_out, hidden_states, loss_language_action)
+        result = (connector_out, hidden_states, loss_language_action, None)
         return result + (outputs.last_hidden_state,) if return_last_hidden_state else result
 
     # Utilities for generating VLM conditions from Paligemma
@@ -1071,7 +1146,7 @@ class VLANeXt(nn.Module):
             if self.policy_gradient_stop_for_vlm:
                 query_outputs = query_outputs.detach()
             connector_out = self.connector(query_outputs)
-        result = (connector_out, hidden_states, loss_language_action)
+        result = (connector_out, hidden_states, loss_language_action, None)
         return result + (outputs.last_hidden_state,) if return_last_hidden_state else result
 
     # Utilities for language action loss computation inside the backbone and conditions
@@ -1166,7 +1241,7 @@ class VLANeXt(nn.Module):
 
     # Forward for classification loss
     def _forward_classification(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, mm_token_type_ids=None, token_type_ids=None, language_action_labels=None, future_images=None, return_loss_components=False):
-        connector_out, hidden_states, loss_language_action = self.get_vlm_condition(
+        connector_out, hidden_states, loss_language_action, vlm_position_ids = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
             pixel_values=pixel_values, pixel_values_videos=pixel_values_videos,
             image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw,
@@ -1192,6 +1267,7 @@ class VLANeXt(nn.Module):
             hidden_states,
             policy_history,
             gen_hidden_states=gen_hidden_states,
+            vlm_position_ids=vlm_position_ids,
             target_ids=target_ids,
         )
         action_loss, pred_action_continuous = self._classification_loss_and_prediction(
@@ -1257,6 +1333,7 @@ class VLANeXt(nn.Module):
         gen_hidden_states=None,
         target_ids=None,
         generated_ids=None,
+        vlm_position_ids=None,
     ):
         ar_kwargs = {}
         if self.classification_type == "autoregressive":
@@ -1268,6 +1345,7 @@ class VLANeXt(nn.Module):
                 hidden_states,
                 history_actions=policy_history,
                 gen_hidden_states=gen_hidden_states,
+                vlm_position_ids=vlm_position_ids,
                 **ar_kwargs,
             )
         elif self.condition_type == "loose":
@@ -1332,7 +1410,7 @@ class VLANeXt(nn.Module):
 
     # forward for regression loss
     def _forward_regression(self, input_ids, attention_mask, actions, proprioception, history_actions, proprio_attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw, mm_token_type_ids=None, token_type_ids=None, language_action_labels=None, future_images=None, return_loss_components=False):
-        connector_out, hidden_states, loss_language_action = self.get_vlm_condition(
+        connector_out, hidden_states, loss_language_action, vlm_position_ids = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
             pixel_values=pixel_values, pixel_values_videos=pixel_values_videos,
             image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw,
@@ -1352,6 +1430,7 @@ class VLANeXt(nn.Module):
                  hidden_states,
                  history_actions=policy_history,
                  gen_hidden_states=gen_hidden_states,
+                 vlm_position_ids=vlm_position_ids,
              )
         elif self.condition_type == "loose":
              cond_input = connector_out.mean(dim=1)
@@ -1404,7 +1483,7 @@ class VLANeXt(nn.Module):
                 return_loss_components=return_loss_components,
             )
 
-        connector_out, hidden_states, loss_language_action = self.get_vlm_condition(
+        connector_out, hidden_states, loss_language_action, vlm_position_ids = self.get_vlm_condition(
             input_ids, attention_mask, proprioception=proprioception, proprio_attention_mask=proprio_attention_mask,
             pixel_values=pixel_values, pixel_values_videos=pixel_values_videos,
             image_grid_thw=image_grid_thw, video_grid_thw=video_grid_thw,
@@ -1442,6 +1521,7 @@ class VLANeXt(nn.Module):
                 hidden_states,
                 history_actions=policy_history,
                 gen_hidden_states=gen_hidden_states,
+                vlm_position_ids=vlm_position_ids,
             )
         elif self.condition_type == "loose":
             cond_input = connector_out.mean(dim=1)
@@ -1714,7 +1794,7 @@ class VLANeXt(nn.Module):
             )
         B = input_ids.shape[0]
 
-        connector_out, hidden_states, _ = self.get_vlm_condition(
+        connector_out, hidden_states, _, vlm_position_ids = self.get_vlm_condition(
             input_ids, attention_mask,
             proprioception=proprioception,
             proprio_attention_mask=proprio_attention_mask,
@@ -1766,6 +1846,7 @@ class VLANeXt(nn.Module):
                     hidden_states,
                     history_actions=policy_history,
                     gen_hidden_states=gen_hidden_states,
+                    vlm_position_ids=vlm_position_ids,
                 )
             elif self.condition_type == "loose":
                 cond_input = connector_out.mean(dim=1)
@@ -1783,6 +1864,7 @@ class VLANeXt(nn.Module):
                     hidden_states,
                     policy_history,
                     gen_hidden_states,
+                    vlm_position_ids,
                     input_ids.device,
                 )
                 if self.fast_tokenizer is not None:
@@ -1796,6 +1878,7 @@ class VLANeXt(nn.Module):
                 hidden_states,
                 policy_history,
                 gen_hidden_states=gen_hidden_states,
+                vlm_position_ids=vlm_position_ids,
             )
 
             if self.fast_tokenizer is not None:
@@ -1826,6 +1909,7 @@ class VLANeXt(nn.Module):
                         hidden_states,
                         history_actions=policy_history,
                         gen_hidden_states=gen_hidden_states,
+                        vlm_position_ids=vlm_position_ids,
                     )
                 else:
                     cond_input = connector_out.mean(dim=1)
@@ -1846,7 +1930,16 @@ class VLANeXt(nn.Module):
             raise ValueError(f"Unknown loss type: {self.loss_type}")
 
     # Utils for classification inference
-    def _generate_autoregressive_classification_ids(self, B, connector_out, hidden_states, policy_history, gen_hidden_states, device):
+    def _generate_autoregressive_classification_ids(
+        self,
+        B,
+        connector_out,
+        hidden_states,
+        policy_history,
+        gen_hidden_states,
+        vlm_position_ids,
+        device,
+    ):
         max_len = self.fast_expected_seq_len if self.fast_tokenizer is not None else self.num_actions * self.action_dim
         generated_ids = torch.empty(B, 0, device=device, dtype=torch.long)
         finished = torch.zeros(B, device=device, dtype=torch.bool)
@@ -1857,6 +1950,7 @@ class VLANeXt(nn.Module):
                 hidden_states,
                 policy_history,
                 gen_hidden_states=gen_hidden_states,
+                vlm_position_ids=vlm_position_ids,
                 generated_ids=generated_ids,
             )
             next_logits = logits[:, -1, :]
@@ -1939,7 +2033,7 @@ class VLANeXt(nn.Module):
         finished = torch.zeros(input_ids.shape[0], dtype=torch.bool, device=input_ids.device)
 
         for _ in range(max_new_tokens):
-            _, _, _, last_hidden_state = self.get_vlm_condition(
+            _, _, _, _, last_hidden_state = self.get_vlm_condition(
                 input_ids,
                 attention_mask,
                 proprioception=proprioception,
@@ -2120,7 +2214,7 @@ class VLANeXt(nn.Module):
         if self.wan_action_condition_mode == "fast":
             if return_video:
                 raise ValueError("return_video=True requires wan_action_condition_mode='joint'.")
-            _, hidden_states, _ = self._get_vlm_condition_wam(
+            _, hidden_states, _, _ = self._get_vlm_condition_wam(
                 prompt_texts=prompt_texts,
                 current_images=current_images,
                 proprioception=proprioception,
@@ -2187,7 +2281,7 @@ class VLANeXt(nn.Module):
         if self.future_image_prediction_type != "emu_token":
             raise ValueError("predict_image is only supported for future_image_prediction_type='emu_token'.")
 
-        _, hidden_states, _ = self.get_vlm_condition(
+        _, hidden_states, _, _ = self.get_vlm_condition(
             input_ids, attention_mask,
             proprioception=proprioception,
             proprio_attention_mask=proprio_attention_mask,

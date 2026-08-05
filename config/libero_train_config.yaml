@@ -1,6 +1,6 @@
 project:
   # [projectname]_[versionname]_[benchmarkname]_[else......]
-  name: "codebase_v2_libero_mixed_steps20k_bs128_lerobot_distributed"
+  name: "codebase_v3_libero_mixed_steps20k_bs128_lerobot_distributed"
   output_dir: "/data/NTU_slab/draven/checkpoints/codebase"
   log_interval: 10
   save_interval: 20000
@@ -21,8 +21,11 @@ data:
   task_suite_name: "libero_mixed"
   # optional action stats override; empty uses task_suite_name
   normalization_suite_name: "libero_mixed"
+  # action stats version options: original, legacy
+  normalization_stats_version: "legacy"
   full_sequence: true  # If true, sample every timestep; if false, subsample
   sampling_rate: 0.1
+  balance_suites: false  # Only affects libero_mixed with dataset_format="lerobot"
 
   # number of past timesteps
   # proprio: applicable for proprio. or action if "use_proprio_input_vlm=true" or "use_action_input_policy=true"
@@ -132,6 +135,7 @@ model:
   policy_depth: 29
   policy_num_heads: 16
   policy_mlp_ratio: 4.0
+  policy_pos_embed: "absolute" # Options: "absolute", "rope"; rope only supports Qwen tight/soft
 
   # auxiliary future image prediction loss weight (>0 activates world modelling)
   future_image_loss_weight: 0.0 # set to 1.0 to activate
@@ -186,7 +190,7 @@ size_speed_eval:
   num_runs: 50
 
 train:
-  seed: 42
+  seed: 42 # default is 42
   resume_path: "" # path to checkpoint to resume training, empty for fresh start
   pretrained_checkpoint: "" # path to the pretrained model checkpoint
   # Set true when loading a latent-action pretrained VLA into a real-action finetune run with different action_dim.
@@ -204,7 +208,8 @@ train:
   ema:
     enabled: false
     ema_weight: 0.999 # the weight for the old ema ckpt (1-weight for the current)
-    save_interval: 5 # the intervel of saving ema ckpt
+    update_interval: 5 # interval for updating EMA weights in memory
+    save_interval: 20000 # interval for saving EMA weights to disk
 
   train_alignment:  # only applicable if having pretrained_checkpoint
     enabled: false
