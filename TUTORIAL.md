@@ -285,10 +285,6 @@ data:
 
 The collator samples one set of augmentation parameters and applies it consistently across frames/views in a sample.
 
-Backbone note:
-
-- When using WAN future-video generation loss (`model.video_generation_loss_weight > 0`), disable data augmentation by setting `data.augmentation.enabled: false`. Augmented visual inputs/targets make future-video prediction harder to learn.
-
 #### Example from current config
 
 The current config enables crop and several jitters.
@@ -663,14 +659,9 @@ These parameters are active only when `model.lmm_path` contains `wan`.
 - `model.wan_prompt_template`: prompt template. It can use `{instruction}` and `{task}`.
 - `data.future_video_downsample`: temporal downsampling for future video targets. WAN expects `future_len / future_video_downsample + 1` frames including the current frame, and the resulting frame count must satisfy `T % 4 == 1`.
 
-When enabling video generation loss, disable visual data augmentation. Future-video generation needs temporally consistent visual targets, while crop/color jitter makes the objective harder to learn.
-
 WAN constraints:
 
 ```yaml
-data:
-  augmentation:
-    enabled: false
 model:
   loss_type: "diffusion"
   scheduler_type: "flow_match"
