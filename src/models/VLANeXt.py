@@ -52,9 +52,26 @@ def _resolve_hf_snapshot_path(model_path):
     try:
         from huggingface_hub import snapshot_download
 
-        return snapshot_download(repo_id=model_path, local_files_only=True)
+        resolved_model_path = snapshot_download(repo_id=model_path, local_files_only=True)
+        if _snapshot_has_transformers_weights(resolved_model_path):
+            return resolved_model_path
     except Exception:
-        return model_path
+        pass
+    # Fall back to the repo id so transformers/huggingface_hub can finish the
+    # download through its own locking logic when the cached snapshot is partial.
+    return model_path
+
+
+def _snapshot_has_transformers_weights(snapshot_path):
+    if not os.path.isdir(snapshot_path):
+        return False
+
+    with os.scandir(snapshot_path) as snapshot_entries:
+        return any(
+            entry.is_file()
+            and (entry.name.endswith(".safetensors") or entry.name.endswith(".bin"))
+            for entry in snapshot_entries
+        )
 
 class VLANeXt(nn.Module):
 
