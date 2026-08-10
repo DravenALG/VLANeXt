@@ -790,14 +790,12 @@ class VLANeXt(nn.Module):
         token_timesteps[:, :first_frame_tokens] = 0
         return token_timesteps
 
-    def _wan_fast_video_attention_inputs(self, video_latents, timesteps):
+    def _wan_video_self_attn_mask(self, video_latents):
+        # Keep the same prefix mask used by fast mode so joint stays aligned.
         _, first_frame_tokens, seq_len = self._wan_video_token_layout(video_latents)
-
         self_attn_mask = torch.ones((seq_len, seq_len), dtype=torch.bool, device=video_latents.device)
         self_attn_mask[:first_frame_tokens, first_frame_tokens:] = False
-
-        token_timesteps = self._wan_first_frame_token_timesteps(video_latents, timesteps)
-        return token_timesteps, self_attn_mask
+        return self_attn_mask
 
     def _get_vlm_condition_wam(
         self,
@@ -894,15 +892,8 @@ class VLANeXt(nn.Module):
         target_velocity = noise - clean_latents
 
         context = self._wan_context(prompt_texts, proprioception=proprioception)
-        video_timesteps = timesteps.to(device=clean_latents.device, dtype=clean_latents.dtype)
-        self_attn_mask = None
-        if self.wan_action_condition_mode == "fast":
-            video_timesteps, self_attn_mask = self._wan_fast_video_attention_inputs(
-                noisy_latents,
-                video_timesteps,
-            )
-        else:
-            video_timesteps = self._wan_first_frame_token_timesteps(noisy_latents, video_timesteps)
+        video_timesteps = self._wan_first_frame_token_timesteps(noisy_latents, timesteps)
+        self_attn_mask = self._wan_video_self_attn_mask(noisy_latents)
         pred_velocity, hidden_states = self.lmm.forward_latents(
             noisy_latents,
             video_timesteps,
@@ -2263,6 +2254,7 @@ class VLANeXt(nn.Module):
         video_latents = torch.randn(latent_shape, device=device, dtype=dtype)
         video_latents[:, :, :1] = first_latent[:, :, :1]
         context = self._wan_context(prompt_texts, proprioception=proprioception)
+        self_attn_mask = self._wan_video_self_attn_mask(video_latents)
 
         for timestep, delta, sigma in zip(timestep_values, deltas, sigmas[:-1]):
             timesteps = torch.full((batch_size,), timestep, device=device, dtype=dtype)
@@ -2272,6 +2264,7 @@ class VLANeXt(nn.Module):
                 video_timesteps,
                 context,
                 return_hidden_states=True,
+                self_attn_mask=self_attn_mask,
             )
             pred_action = self.action_head(
                 action,
