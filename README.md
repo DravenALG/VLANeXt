@@ -4,9 +4,9 @@
 
 # VLANeXt Family: From Core Recipes to Emerging Paradigms
 
-<!-- RELEASE TODO: 2609.00000 is a fictitious arXiv placeholder for VLANeXt Family. Replace every occurrence in this README when the identifier is assigned. -->
+<!-- RELEASE TODO: Add the VLANeXt Family arXiv link and citation once the paper is released. -->
 [![VLANeXt Paper](https://img.shields.io/badge/VLANeXt-2602.18532-b31b1b.svg)](https://arxiv.org/abs/2602.18532)
-[![VLANeXt Family Paper](https://img.shields.io/badge/VLANeXt_Family-2609.00000-b31b1b.svg)](https://arxiv.org/abs/2609.00000)
+![VLANeXt Family Paper: Coming Soon](https://img.shields.io/badge/VLANeXt_Family-Coming_Soon-gray.svg)
 [![Project Page](https://img.shields.io/badge/Project-Page-green)](https://dravenalg.github.io/projects/VLANeXt/)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models-yellow)](https://huggingface.co/DravenALG/VLANeXt)
 [![Awesome VLA & WAM](https://img.shields.io/badge/GitHub-AwesomeVLA&WAM-black)](https://github.com/DravenALG/awesome-vla-wam)
@@ -16,7 +16,7 @@
 | Paper | Scope |
 | --- | --- |
 | **[VLANeXt: Recipes for Building Strong VLA Models](https://arxiv.org/abs/2602.18532)**<br>ICML 2026 | A systematic study of the VLA design space, distilling 12 findings into the core VLANeXt recipe. |
-| **[VLANeXt Family: A Systematic Study of VLA Models from Core Recipes to Emerging Paradigms](https://arxiv.org/abs/2609.00000)**<br>arXiv 2026 · Extended version | Demonstrates the robustness and generality of the core recipe across model scales and emerging VLA paradigms. |
+| **VLANeXt Family: A Systematic Study of VLA Models from Core Recipes to Emerging Paradigms**<br>arXiv: coming soon · Extended version | Demonstrates the robustness and generality of the core recipe across model scales and emerging VLA paradigms. |
 
 VLANeXt Family builds directly on our ICML work, with the original VLANeXt serving as the base model. **Both papers share one codebase**, with a common model implementation, training entry point, and evaluation pipeline. Variants are selected through configuration files.
 
@@ -24,7 +24,7 @@ VLANeXt Family builds directly on our ICML work, with the original VLANeXt servi
 
 ## Changelog & News
 
-- **2026.09** 🚀 **VLANeXt Family is released!** Five new variants, **S, L, LAM, JEPA, and WAM**, extend the core recipe across model scales and emerging paradigms within one shared framework.
+- **2026.09** 🚀 **VLANeXt Family paper: coming soon!** The paper is awaiting release on arXiv. Five new variants, **S, L, LAM, JEPA, and WAM**, extend the core recipe across model scales and emerging paradigms within one shared framework.
 - **2026.06** 🎉 **VLANeXt** has been accepted to **ICML 2026**!
 
 ## 📖 From VLANeXt to the VLANeXt Family
@@ -253,20 +253,13 @@ If you run into issues, check [COMMON_ISSUES.md](COMMON_ISSUES.md) for known pro
 
 ## 📚 Citation
 
-If you build on the core VLANeXt recipe, please cite our ICML paper. If you use the Family variants or their extended studies, please also cite VLANeXt Family.
+If you build on the core VLANeXt recipe, please cite our ICML paper. Citation details for VLANeXt Family are **coming soon**, pending its arXiv release.
 
 ```bibtex
 @inproceedings{wu2026vlanext,
   title={VLANeXt: Recipes for Building Strong VLA Models},
   author={Xiao-Ming Wu and Bin Fan and Kang Liao and Jian-jian Jiang and Runze Yang and Yihang Luo and Zhonghua Wu and Wei-Shi Zheng and Chen Change Loy},
   booktitle={ICML},
-  year={2026}
-}
-
-@article{wu2026vlanextfamily,
-  title={VLANeXt Family: A Systematic Study of VLA Models from Core Recipes to Emerging Paradigms},
-  author={Xiao-Ming Wu and Kang Liao and Yihang Luo and Bin Fan and Jian-jian Jiang and Runze Yang and Zhonghua Wu and Wei-Shi Zheng and Chen Change Loy},
-  journal={arXiv preprint arXiv:2609.00000},
   year={2026}
 }
 ```
