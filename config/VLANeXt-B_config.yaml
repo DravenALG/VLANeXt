@@ -1,0 +1,233 @@
+project:
+  # [projectname]_[versionname]_[benchmarkname]_[else......]
+  name: "codebase_v3_libero_mixed_steps20k_bs128_lerobot_distributed"
+  output_dir: "/data/NTU_slab/draven/checkpoints/codebase"
+  log_interval: 10
+  save_interval: 20000
+  use_wandb: true
+
+data:
+  dataset_name: "libero"
+  # data format options: "tfds", "lerobot"
+  dataset_format: "lerobot"
+  # tfds: /data/NTU_slab/draven/data/LIBERO_modified, /data/NTU_slab/draven/data/LIBERO_plus
+  # lerobot: /data/NTU_slab/draven/data/LIBERO_fastwam
+  data_root: "/data/NTU_slab/draven/data/LIBERO_fastwam"
+  # action target mode, options: "libero", "latent".
+  # For latent-action pretraining, set data_root to /data/NTU_slab/draven/data/LIBERO_fastwam_lam,
+  # set action_mode to "latent", and set model.action_dim to the LAM latent_dim.
+  action_mode: "libero"
+  # options: libero_spatial, libero_object, libero_goal, libero_10, libero_mixed
+  task_suite_name: "libero_mixed"
+  # optional action stats override; empty uses task_suite_name
+  normalization_suite_name: "libero_mixed"
+  # action stats version options: original, legacy
+  normalization_stats_version: "legacy"
+  full_sequence: true  # If true, sample every timestep; if false, subsample
+  sampling_rate: 0.1
+  balance_suites: false  # Only affects libero_mixed with dataset_format="lerobot"
+
+  # number of past timesteps
+  # proprio: applicable for proprio. or action if "use_proprio_input_vlm=true" or "use_action_input_policy=true"
+  # video: also applicable for video input if input_modality="video"
+  history_len: 8
+
+  # action chunking length
+  future_len: 8
+  # For WAN video-generation backbone, future video contains current frame plus downsampled future frames.
+  future_video_downsample: 1
+
+  # shuffle buffer size
+  buffer_size: 1000
+
+  # batch training configs
+  batch_size: 128  # this is the total batch size across all GPUs, it will be automatically divided by the number of GPUs used
+  max_steps: 20000 # 10k for spatial, object, goal; 12k for long (10), 20k for mixed
+  num_workers: 1
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  drop_last: false
+
+  # vision input controls
+  input_modality: "image"   # temporal history, options: "video", "image"
+  # Resize frames in the dataset before augmentation/processor. Use null to keep raw dataset size.
+  image_resize_size: 256
+
+  # camera view, options: "single", "multi"
+  view_mode: "multi"
+
+  # bimanual: if true, collator uses 3 cameras (main + left_wrist + right_wrist)
+  bimanual: false
+
+  # allow_end_padding: if true, samples near the end of a trajectory are included
+  allow_end_padding: true
+  
+  # augmentation (applied to image/video frames before processor)
+  augmentation:
+    enabled: true
+    random_resized_crop:
+      scale: [0.8, 1.0]
+      ratio: [0.9, 1.1]
+    random_brightness: [0.2]
+    random_contrast: [0.8, 1.2]
+    random_saturation: [0.8, 1.2]
+    random_hue: [0.05]
+    augment_order:
+      - "random_resized_crop"
+      - "random_brightness"
+      - "random_contrast"
+      - "random_saturation"
+      - "random_hue"
+
+model:
+  # Options: 
+  # Qwen/Qwen3.5-0.8B, Qwen/Qwen3.5-2B, Qwen/Qwen3.5-4B, Qwen/Qwen3.5-9B,
+  # Qwen/Qwen3-VL-2B-Instruct, Qwen/Qwen3-VL-4B-Instruct, Qwen/Qwen3-VL-8B-Instruct
+  # google/paligemma-3b-pt-224, 
+  # meta-llama/Llama-3.2-3B,
+  # Wan-AI/Wan2.2-TI2V-5B,
+  lmm_path: "Qwen/Qwen3-VL-2B-Instruct"
+  # vision encoder path (only applicable for llama based VLMs)
+  vision_encoder_path: "google/siglip2-base-patch16-256"
+  # if false, initialize backbone weights from config instead of pretrained weights
+  use_pretrained_backbone: true
+  # backbone training mode, options: "frozen", "finetune"
+  backbone_mode: "finetune"
+  # fine-grained backbone controls; true/false overrides, null follows backbone_mode
+  train_text_embedding: true
+  train_vision_encoder: true
+
+  # action dimension
+  action_dim: 7
+  
+  # loss type option: "diffusion", "regression", "classification"
+  loss_type: "diffusion" # Options: "diffusion", "regression", "classification"
+  # diffusion loss configs (applicable if loss_type is "diffusion")
+  num_train_timesteps: 1000
+  num_inference_timesteps: 10
+  scheduler_type: "flow_match" # Options: "ddim", "flow_match"
+  # diffusion regression target. "noise": predict ε (DDIM) or velocity ε-x0 (flow_match).
+  # "x0": predict the clean action directly; MSE is computed in x0 space.
+  diffusion_loss_domain: "noise" # Options: "noise", "x0"
+  # classification loss configs (applicable if loss_type is "classification")
+  classification_type: autoregressive # Options: "parallel", "autoregressive"
+  num_bins: 256
+  fast_action_tokenizer:
+    enabled: false
+    expected_seq_len: 48  # includes one EOS slot
+    tokenizer_path: "src/models/fast_tokenizer/libero_mixed"  # empty = use bundled pretrained; set to output_dir from train_FAST.py
+
+  # condition type option: "loose", "tight", "soft"
+  condition_type: "soft"
+  # loose or soft conditioning configs (applicable if condition_type is "loose" or "soft")
+  num_queries: 16
+  # loose conditioning configs (applicable if condition_type is "loose")
+  use_transformer_connector: true
+  connector_depth: 2
+  connector_num_heads: 4
+
+  # policy configs
+  policy_hidden_size: 1024  # 1024 in default
+  # 24 for Qwen3.5 0.8 and Qwen3.5 2B, 32 for Qwen3.5 4B and Qwen3.5 9B;
+  # 29 for Qwen3-VL-2B; 36 for Qwen3-VL-4B and Qwen3-VL-8B;
+  # 30 for Wan2.2-TI2V-5B;
+  policy_depth: 29
+  policy_num_heads: 16
+  policy_mlp_ratio: 4.0
+  policy_pos_embed: "absolute" # Options: "absolute", "rope"; rope only supports Qwen tight/soft
+
+  # auxiliary future image prediction loss weight (>0 activates world modelling)
+  future_image_loss_weight: 0.0 # set to 1.0 to activate
+  future_image_prediction_type: "dinov3_flow" # Options: "emu_token", "dinov3_flow"
+  future_image_mode: "horizon" # Options: "horizon", "goal"
+  future_image_dino_model_path: "facebook/dinov3-vitb16-pretrain-lvd1689m"
+  future_image_dino_image_size: 256
+  future_image_flow_num_inference_timesteps: 10
+  generator_hidden_size: 768
+  generator_depth: 24
+  generator_num_heads: 12
+  generator_mlp_ratio: 4.0
+  generator_max_seq_len: 1024
+  future_image_num_tokens: 256
+
+  # WAN video-generation backbone configs. Active only when lmm_path contains "wan".
+  # WAN requires loss_type="diffusion", scheduler_type="flow_match", condition_type="tight".
+  video_generation_loss_weight: 0.0 # set to 1.0 to activate
+  wan_action_condition_mode: "fast" # Options: "fast", "joint"
+  wan_flow_shift: 5.0
+  wan_text_len: 512
+  wan_tokenizer_model_id: "google/umt5-xxl"
+  wan_prompt_template: "A video recorded from a robot's point of view executing the instruction: {instruction}"
+
+  # auxiliary dct loss weight (>0 activates)
+  dct_loss_weight: 0.1
+  dct_freq_split: 0.125
+  dct_low_freq_weight: 5.0
+  dct_high_freq_weight: 0.0
+  dct_similarity_type: "mse" # Options: "mse", "mae", "cosine", cosine needs smaller dct_loss_weight
+
+  # auxiliary language-action generation loss weight (>0 activates)
+  language_action_loss_weight: 0.0 # set to 1.0 to activate
+  policy_gradient_stop_for_vlm: false # if true, stop action-policy gradients from flowing into the VLM
+  language_action_format: "lap" # Options: "vla-0", "lap" ("language-action" alias)
+  language_action_num_bins: 1000 # only used by vla-0
+  language_action_max_new_tokens: 256 # inference-time language-action generation cap
+
+  # action condition configs
+  use_proprio_input_vlm: true
+  use_transformer_proprio_projector: false
+  projector_depth: 2 # only applicable if use_transformer_proprio_projector=true
+  projector_num_heads: 4
+  use_action_input_policy: false
+  gradient_checkpointing: true
+
+size_speed_eval:
+  enabled: false
+  exit_after_eval: false
+  batch_size: 1
+  num_warmup: 5
+  num_runs: 50
+
+train:
+  seed: 42 # default is 42
+  resume_path: "" # path to checkpoint to resume training, empty for fresh start
+  pretrained_checkpoint: "" # path to the pretrained model checkpoint
+  # Set true when loading a latent-action pretrained VLA into a real-action finetune run with different action_dim.
+  pretrained_ignore_mismatched_shapes: false
+  learning_rate: 1.0e-4
+  scheduler: "cosine_decay" # Options: "cosine_decay", "linear_decay", "fixed"; "fixed" keeps LR constant after warmup
+  weight_decay: 0.1  # 0.1 as default
+  warmup_steps: 1000 # 5% of max steps
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  device: "cuda"
+  distributed: true
+  dist_backend: "nccl"
+  
+  ema:
+    enabled: false
+    ema_weight: 0.999 # the weight for the old ema ckpt (1-weight for the current)
+    update_interval: 5 # interval for updating EMA weights in memory
+    save_interval: 20000 # interval for saving EMA weights to disk
+
+  train_alignment:  # only applicable if having pretrained_checkpoint
+    enabled: false
+    learning_rate: 1.0e-4
+    alignment_steps: 600 # 20% of max steps
+    warmup_steps: 60 # 10% of alignment_steps
+    train_action_modules: true  # if true, unfreezes the action_projector (encoder) and the action policy head (scope controlled by train_full_policy)
+    train_full_policy: false  # only applicable if train_action_modules=true; if true, unfreezes the entire action_head (whole policy), otherwise only action_head.final_layer
+    reinit_action_modules: false  # only applicable if train_action_modules=true; reinitializes the action_projector and action_head.final_layer
+    train_text_embedding: false  # if true, also unfreezes the VLM input text token embedding during alignment
+    train_vision_encoder: false  # if true, also unfreezes the vision encoder during alignment
+
+  deepspeed:
+    enabled: false  # set to true to use DeepSpeed instead of DDP
+    zero_stage: 1   # ZeRO optimization stage: 0, 1, 2, or 3
+    offload_optimizer_device: "none"  # "none", "cpu", or "nvme"
+    offload_param_device: "none"      # "none", "cpu", or "nvme" (ZeRO-3 only)
+    reduce_bucket_size: 5.0e8
+    allgather_bucket_size: 5.0e8
+    partition_activations: false  # activation checkpointing partitioning
+    cpu_checkpointing: false      # offload activation checkpoints to CPU

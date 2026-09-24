@@ -1,0 +1,24 @@
+data:
+  augmentation:
+    center_crop: true
+    center_crop_ratio: 0.9
+
+# reconfig the difffusion inference settings (applicable if model.loss_type is "diffusion")
+model:
+  diffusion_steps: 5
+  scheduler_type: "flow_match" # Options: "ddpm", "ddim", "flow_match"
+
+project:
+  use_wandb: false
+
+eval:
+  finetuned_checkpoint: "/data/NTU_slab/draven/checkpoints/codebase/codebase_v3_libero/mixed_steps20k_bs128_lerobot_distributed/checkpoint_final.pt" # Path to the finetuned model checkpoint
+  task_suite_name: "libero_spatial" # Options: libero_spatial, libero_object, libero_goal, libero_10
+  num_steps_wait: 10
+  num_steps_execute: 8 # Number of actions to execute from the predicted chunk
+  num_parallel_envs: 32 # Number of episodes/tasks to evaluate in parallel
+  num_trials_per_task: 1
+  seed: 42
+  image_size: 256
+  resume_episodes: 0    # for resume, total episodes already completed across all tasks, 0 for fresh start
+  resume_successes: 0   # for resume, total successes achieved in those completed episodes, 0 for fresh start
