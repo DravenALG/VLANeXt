@@ -15,7 +15,7 @@
 | Paper | Scope |
 | --- | --- |
 | **[VLANeXt: Recipes for Building Strong VLA Models](https://arxiv.org/abs/2602.18532v2)**<br>ICML 2026 | A systematic study of the VLA design space, distilling 12 findings into the core VLANeXt recipe. |
-| **[VLANeXt Family: A Systematic Study of VLA Models from Core Recipes to Emerging Paradigms](https://arxiv.org/abs/2602.18532)**<br>arXiv: 2602.18532 · Extended version | Demonstrates the robustness and generality of the core recipe across model scales and emerging VLA paradigms. |
+| **[VLANeXt Family: A Systematic Study of VLA Models from Core Recipes to Emerging Paradigms](https://arxiv.org/abs/2602.18532)**<br>arXiv · Extended version | Demonstrates the robustness and generality of the core recipe across model scales and emerging VLA paradigms. |
 
 VLANeXt Family builds directly on our ICML work, with the original VLANeXt serving as the base model. **Both papers share one codebase**, with a common model implementation, training entry point, and evaluation pipeline. Variants are selected through configuration files.
 
@@ -260,7 +260,6 @@ If you build on the core VLANeXt recipe, please cite our ICML paper. If you buil
   author={Xiao-Ming Wu and Bin Fan and Kang Liao and Jian-jian Jiang and Runze Yang and Yihang Luo and Zhonghua Wu and Wei-Shi Zheng and Chen Change Loy},
   booktitle={ICML},
   year={2026},
-  url={https://arxiv.org/abs/2602.18532v2}
 }
 
 @article{wu2026vlanextfamily,
